@@ -1,0 +1,10 @@
+services:
+  simulation:
+    build: .
+    container_name: acts_simulation
+    ports:
+      - "8521:8521"
+    volumes:
+      # Mounts source code for live-reloading during development
+      - ./src:/app
+    command: python -m acts.visualization.server

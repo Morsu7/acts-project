@@ -1,80 +1,55 @@
 from mesa.visualization.ModularVisualization import ModularServer
 from mesa.visualization.modules import NetworkModule
 from mesa.visualization.UserParam import Slider
-
 from acts.core.simulation import CityModel
-from acts.agents.infrastructure import TrafficLightAgent
 from acts.agents.vehicle import VehicleAgent
+from acts.agents.infrastructure import TrafficLightAgent
 
 def network_portrayal(G):
     portrayal = dict()
     portrayal['nodes'] = []
     portrayal['edges'] = []
 
-    # Disegna le strade (Archi)
     for source, target in G.edges():
         portrayal['edges'].append({
-            'source': source, 
-            'target': target,
-            'color': '#333333', 
-            'width': 2,
+            'source': source, 'target': target,
+            'color': '#000000', 'width': 1,
         })
 
-    # Disegna i Nodi (Semafori e Auto)
     for node in G.nodes():
         agents = G.nodes[node].get("agent", [])
         
-        # 1. Cerchiamo chi c'è nel nodo
-        tl_agent = None
-        cars = []
-        for a in agents:
-            if isinstance(a, TrafficLightAgent): 
-                tl_agent = a
-            if isinstance(a, VehicleAgent): 
-                cars.append(a)
-
-        # 2. Colore base: dipende dal SEMAFORO
-        color = "#CCCCCC" # Default (Spento/Grigio)
-        if tl_agent:
-            if tl_agent.state == "GREEN": 
-                color = "#00FF00" # Verde
-            else: 
-                color = "#FF0000" # Rosso
-
-        size = 10
-        label = str(node)
+        tl = next((a for a in agents if isinstance(a, TrafficLightAgent)), None)
+        cars = [a for a in agents if isinstance(a, VehicleAgent)]
         
-        # 3. Se ci sono AUTO, sovrascriviamo la visualizzazione
-        # Le auto sono blu per vederle bene sopra il rosso/verde
-        if len(cars) > 0:
-            size = 18
-            color = "#0000FF" # Blu Elettrico
-            label = f"{node} ({len(cars)})"
+        # Base: Semaforo
+        color = "#00FF00" if tl and tl.state == "GREEN" else "#FF0000"
+        size = 8
+        label = str(node)
+        tooltip = f"Nodo {node}<br>Stato: {tl.state if tl else 'None'}"
+
+        # Se ci sono auto
+        if cars:
+            # Distinguiamo visivamente chi è in coda e chi è in "viaggio" (DRIVING)
+            driving_cars = [c for c in cars if c.state == "DRIVING"]
+            queued_cars = [c for c in cars if c.state == "QUEUED"]
+            
+            if driving_cars:
+                color = "#FFA500" # Arancione = In transito (sta partendo)
+                tooltip += f"<br>🚗 In partenza: {len(driving_cars)}"
+            
+            if queued_cars:
+                color = "#0000FF" # Blu = In coda
+                size = 12 + (len(queued_cars) * 2) # Più grosso se c'è coda
+                label = f"{node} ({len(queued_cars)})"
+                tooltip += f"<br>🚙 In coda: {len(queued_cars)}"
 
         portrayal['nodes'].append({
-            "id": node,
-            "size": size,
-            "color": color,
-            "label": label,
+            "id": node, "size": size, "color": color, "label": label, "tooltip": tooltip
         })
 
     return portrayal
 
-# --- QUESTA È LA PARTE CHE MANCAVA ---
-
-# Configurazione del Network Module
 network = NetworkModule(network_portrayal, 600, 600)
-
-model_params = {
-    "N": Slider("Numero Veicoli", 5, 1, 15, 1) 
-}
-
-# Avvio del Server
-server = ModularServer(
-    CityModel,
-    [network],
-    "ACTS: Distributed Traffic System",
-    model_params
-)
-
+server = ModularServer(CityModel, [network], "ACTS: Distributed Graphs", {"N": Slider("Auto", 5, 1, 20)})
 server.port = 8521

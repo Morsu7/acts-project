@@ -1,9 +1,9 @@
 from mesa.visualization.ModularVisualization import ModularServer
-from mesa.visualization.modules import NetworkModule
 from mesa.visualization.UserParam import Slider
 from acts.core.simulation import CityModel
 from acts.agents.vehicle import VehicleAgent
 from acts.agents.infrastructure import TrafficLightAgent
+from acts.visualization.network_module_custom import CustomNetworkModule
 
 def network_portrayal(G):
     portrayal = dict()
@@ -18,15 +18,19 @@ def network_portrayal(G):
 
     for node in G.nodes():
         agents = G.nodes[node].get("agent", [])
+        pos = G.nodes[node].get("pos", (0.0, 0.0))
+        node_tl_state = G.nodes[node].get("tl_state", "GREEN")
+        intersection_id = G.nodes[node].get("intersection", node)
         
         tl = next((a for a in agents if isinstance(a, TrafficLightAgent)), None)
         cars = [a for a in agents if isinstance(a, VehicleAgent)]
         
         # Base: Semaforo
-        color = "#00FF00" if tl and tl.state == "GREEN" else "#FF0000"
+        effective_state = tl.state if tl else node_tl_state
+        color = "#00FF00" if effective_state == "GREEN" else "#FF0000"
         size = 8
         label = str(node)
-        tooltip = f"Nodo {node}<br>Stato: {tl.state if tl else 'None'}"
+        tooltip = f"Nodo {node}<br>Incrocio: {intersection_id}<br>Stato: {effective_state}"
 
         # Se ci sono auto
         if cars:
@@ -45,11 +49,17 @@ def network_portrayal(G):
                 tooltip += f"<br>🚙 In coda: {len(queued_cars)}"
 
         portrayal['nodes'].append({
-            "id": node, "size": size, "color": color, "label": label, "tooltip": tooltip
+            "id": node,
+            "size": size,
+            "color": color,
+            "label": label,
+            "tooltip": tooltip,
+            "x": float(pos[0]),
+            "y": float(pos[1]),
         })
 
     return portrayal
 
-network = NetworkModule(network_portrayal, 600, 600)
+network = CustomNetworkModule(network_portrayal, 600, 600)
 server = ModularServer(CityModel, [network], "ACTS: Distributed Graphs", {"N": Slider("Auto", 5, 1, 20)})
 server.port = 8521

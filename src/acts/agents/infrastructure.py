@@ -3,8 +3,10 @@ import redis
 import json
 
 class TrafficLightAgent(Agent):
-    def __init__(self, unique_id, model):
+    def __init__(self, unique_id, model, intersection_id, controlled_nodes):
         super().__init__(unique_id, model)
+        self.intersection_id = intersection_id
+        self.controlled_nodes = list(controlled_nodes)
         self.state = "GREEN"
         
         # --- CONFIGURAZIONE ---
@@ -16,21 +18,36 @@ class TrafficLightAgent(Agent):
         
         self.side_street_duration = 15 
         
-        self.neighbors = list(model.G.neighbors(unique_id))
-        mid = len(self.neighbors) // 2
-        if mid == 0 and self.neighbors: mid = 1
-        
-        self.phases = [
-            self.neighbors[:mid],  # Fase 0 (DEFAULT)
-            self.neighbors[mid:]   # Fase 1 (LATERALE)
-        ]
-        # Se la fase laterale è vuota (vicolo cieco), non serve logica adattiva
-        if not self.phases[1]: self.phases[1] = []
+        incoming_by_intersection = {}
+        controlled_set = set(self.controlled_nodes)
+
+        for target_node in self.controlled_nodes:
+            for source_node in model.G.predecessors(target_node):
+                source_intersection = model.G.nodes[source_node].get("intersection", source_node)
+                if source_intersection == self.intersection_id:
+                    continue
+                incoming_by_intersection.setdefault(source_intersection, set()).add(source_node)
+
+        approaches = list(incoming_by_intersection.values())
+        mid = len(approaches) // 2
+        if mid == 0 and approaches:
+            mid = 1
+
+        phase0 = set()
+        for group in approaches[:mid]:
+            phase0.update(group)
+
+        phase1 = set()
+        for group in approaches[mid:]:
+            phase1.update(group)
+
+        self.phases = [sorted(phase0), sorted(phase1)]
+        if not self.phases[1]:
+            self.phases[1] = []
 
         try:
             self.redis = redis.Redis(host='localhost', port=6379, decode_responses=True)
-            self.redis.delete(f"lock_node_{unique_id}")
-            self.redis.delete(f"sensor_{unique_id}")
+            self.redis.delete(f"sensor_{self.intersection_id}")
             self.update_redis()
         except:
             self.redis = None
@@ -51,7 +68,7 @@ class TrafficLightAgent(Agent):
         if not self.redis: return False
         
         # DEBUG: Vediamo cosa legge il semaforo!
-        sensor_key = f"sensor_{self.unique_id}"
+        sensor_key = f"sensor_{self.intersection_id}"
         sensor_data = self.redis.hgetall(sensor_key)
         
         # Se non c'è fase laterale, esci
@@ -66,7 +83,7 @@ class TrafficLightAgent(Agent):
             
         # FIX 2: Debug nel terminale se c'è qualcuno
         if waiting_cars > 0:
-            print(f"[DEBUG TL_{self.unique_id}] Coda rilevata da {side_nodes}: {waiting_cars} auto (Soglia: {self.cars_threshold})")
+            print(f"[DEBUG TL_{self.intersection_id}] Coda rilevata da {side_nodes}: {waiting_cars} auto (Soglia: {self.cars_threshold})")
 
         return waiting_cars >= self.cars_threshold
 
@@ -77,16 +94,19 @@ class TrafficLightAgent(Agent):
         self.update_redis()
 
     def update_redis(self):
+        for node_id in self.controlled_nodes:
+            self.model.G.nodes[node_id]["tl_state"] = self.state
+
         if self.redis:
             allowed_nodes = self.phases[self.active_phase]
-            self.redis.set(f"tl_{self.unique_id}_allowed", json.dumps(allowed_nodes))
-            
-            # Pubblica evento
+            self.redis.set(f"tl_{self.intersection_id}_allowed", json.dumps(allowed_nodes))
+
             msg = {
-                "agent_id": f"TL_{self.unique_id}",
+                "agent_id": f"TL_{self.intersection_id}",
                 "clock": 0,
                 "event": "PHASE_CHANGE",
                 "data": {
+                    "intersection": self.intersection_id,
                     "new_phase": "DEFAULT" if self.active_phase == 0 else "SIDE",
                     "allowed_from": allowed_nodes
                 }

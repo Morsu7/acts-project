@@ -15,6 +15,7 @@ class VehicleAgent(Agent):
         
         # Flag per non premere il sensore mille volte
         self.sensor_registered = False 
+        self.sensor_target_intersection = None
 
         try:
             self.redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
@@ -40,20 +41,26 @@ class VehicleAgent(Agent):
 
         next_node = self.path[1]
         current_node = self.pos
+        next_intersection = self.model.G.nodes[next_node].get("intersection", next_node)
+        current_intersection = self.model.G.nodes[current_node].get("intersection", current_node)
+        external_entry = current_intersection != next_intersection
         
         # --- 1. SENSORE (Induction Loop) ---
         # Se sono fermo e non mi sono ancora registrato, dillo al semaforo
-        if not self.sensor_registered and self.redis_client:
+        if external_entry and not self.sensor_registered and self.redis_client:
             # Incrementa contatore: sensor_NODO -> { DA_NODO: +1 }
-            self.redis_client.hincrby(f"sensor_{next_node}", str(current_node), 1)
+            self.redis_client.hincrby(f"sensor_{next_intersection}", str(current_node), 1)
             self.sensor_registered = True
+            self.sensor_target_intersection = next_intersection
 
         can_enter = False
+        if not external_entry:
+            can_enter = True
         
-        if self.redis_client:
+        if external_entry and self.redis_client:
             try:
                 # --- 2. CONTROLLO SEMAFORO (ACL) ---
-                allowed_json = self.redis_client.get(f"tl_{next_node}_allowed")
+                allowed_json = self.redis_client.get(f"tl_{next_intersection}_allowed")
                 if allowed_json:
                     allowed_sources = json.loads(allowed_json)
                     if current_node in allowed_sources:
@@ -70,9 +77,10 @@ class VehicleAgent(Agent):
         if can_enter:
             # PARTENZA
             # Rimuovo la mia presenza dal sensore (decremento)
-            if self.sensor_registered and self.redis_client:
-                self.redis_client.hincrby(f"sensor_{next_node}", str(current_node), -1)
+            if self.sensor_registered and self.redis_client and self.sensor_target_intersection is not None:
+                self.redis_client.hincrby(f"sensor_{self.sensor_target_intersection}", str(current_node), -1)
                 self.sensor_registered = False
+                self.sensor_target_intersection = None
 
             try:
                 edge = self.model.G.get_edge_data(self.pos, next_node)
@@ -98,6 +106,7 @@ class VehicleAgent(Agent):
             self.path.pop(0) 
             self.state = "QUEUED"
             self.sensor_registered = False # Reset stato sensore per il nuovo nodo
+            self.sensor_target_intersection = None
             self.publish_event("ARRIVED_NODE", {"node": self.pos})
 
     def select_new_destination(self):

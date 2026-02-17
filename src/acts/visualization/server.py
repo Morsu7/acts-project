@@ -28,7 +28,7 @@ def network_portrayal(G):
         # Base: Semaforo
         effective_state = tl.state if tl else node_tl_state
         color = "#00FF00" if effective_state == "GREEN" else "#FF0000"
-        size = 8
+        size = 6
         label = str(node)
         tooltip = f"Nodo {node}<br>Incrocio: {intersection_id}<br>Stato: {effective_state}"
 
@@ -44,7 +44,6 @@ def network_portrayal(G):
             
             if queued_cars:
                 color = "#0000FF" # Blu = In coda
-                size = 12 + (len(queued_cars) * 2) # Più grosso se c'è coda
                 label = f"{node} ({len(queued_cars)})"
                 tooltip += f"<br>🚙 In coda: {len(queued_cars)}"
 

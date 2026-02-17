@@ -11,8 +11,6 @@ def generate_topology(num_nodes=10, max_degree=5, grid_size=15, cell_size=5):
     diagonal_road_probability = 0.45
 
     base_pos = {}
-    base_undirected_edges = []
-
     for node_id in range(num_nodes):
         row = node_id // cols
         col = node_id % cols
@@ -24,32 +22,52 @@ def generate_topology(num_nodes=10, max_degree=5, grid_size=15, cell_size=5):
         y = min(1.0, max(0.0, base_y + random.uniform(-jitter, jitter)))
         base_pos[node_id] = (x, y)
 
-        right = node_id + 1
-        down = node_id + cols
-        down_right = node_id + cols + 1
-        down_left = node_id + cols - 1
+    def build_base_edges():
+        edges = []
+        for node_id in range(num_nodes):
+            row = node_id // cols
+            col = node_id % cols
 
-        if col < cols - 1 and right < num_nodes and random.random() < road_probability:
-            base_undirected_edges.append((node_id, right))
+            right = node_id + 1
+            down = node_id + cols
+            down_right = node_id + cols + 1
+            down_left = node_id + cols - 1
 
-        if row < rows - 1 and down < num_nodes and random.random() < road_probability:
-            base_undirected_edges.append((node_id, down))
+            if col < cols - 1 and right < num_nodes and random.random() < road_probability:
+                edges.append((node_id, right))
 
-        if (
-            row < rows - 1
-            and col < cols - 1
-            and down_right < num_nodes
-            and random.random() < diagonal_road_probability
-        ):
-            base_undirected_edges.append((node_id, down_right))
+            if row < rows - 1 and down < num_nodes and random.random() < road_probability:
+                edges.append((node_id, down))
 
-        if (
-            row < rows - 1
-            and col > 0
-            and down_left < num_nodes
-            and random.random() < diagonal_road_probability
-        ):
-            base_undirected_edges.append((node_id, down_left))
+            if (
+                row < rows - 1
+                and col < cols - 1
+                and down_right < num_nodes
+                and random.random() < diagonal_road_probability
+            ):
+                edges.append((node_id, down_right))
+
+            if (
+                row < rows - 1
+                and col > 0
+                and down_left < num_nodes
+                and random.random() < diagonal_road_probability
+            ):
+                edges.append((node_id, down_left))
+        return edges
+
+    base_undirected_edges = []
+    max_attempts = 50
+    for _ in range(max_attempts):
+        candidate_edges = build_base_edges()
+        base_graph = nx.Graph()
+        base_graph.add_nodes_from(range(num_nodes))
+        base_graph.add_edges_from(candidate_edges)
+        if num_nodes <= 1 or nx.is_connected(base_graph):
+            base_undirected_edges = candidate_edges
+            break
+    else:
+        base_undirected_edges = candidate_edges
 
     # 2) Espansione: ogni incrocio diventa un mini-grafo di "porte"
     H = nx.DiGraph()

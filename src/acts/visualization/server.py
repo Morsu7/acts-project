@@ -54,6 +54,7 @@ def network_portrayal(G):
             "color": color,
             "label": label,
             "tooltip": tooltip,
+            "intersection": intersection_id,
             "x": float(pos[0]),
             "y": float(pos[1]),
         })

@@ -33,6 +33,7 @@ const NetworkModule = function (svg_width, svg_height) {
   );
 
   const links = g.append("g").attr("class", "links");
+  const intersectionGroups = g.append("g").attr("class", "intersection-groups");
   const nodes = g.append("g").attr("class", "nodes");
 
   this.render = (data) => {
@@ -118,6 +119,59 @@ const NetworkModule = function (svg_width, svg_height) {
 
     links.selectAll("line").data(graph.edges).exit().remove();
 
+    const grouped = d3.group(
+      graph.nodes.filter((node) => Number.isFinite(node.renderX) && Number.isFinite(node.renderY)),
+      (node) => node.intersection
+    );
+
+    const groupData = Array.from(grouped, ([intersection, groupNodes]) => {
+      if (intersection === undefined || groupNodes.length < 2) {
+        return null;
+      }
+      const centerX = d3.mean(groupNodes, (n) => n.renderX);
+      const centerY = d3.mean(groupNodes, (n) => n.renderY);
+      const radius =
+        d3.max(groupNodes, (n) => {
+          const dx = n.renderX - centerX;
+          const dy = n.renderY - centerY;
+          return Math.sqrt(dx * dx + dy * dy);
+        }) + 10;
+      return {
+        intersection,
+        centerX,
+        centerY,
+        radius,
+      };
+    }).filter(Boolean);
+
+    intersectionGroups.selectAll("circle").data(groupData, (d) => d.intersection)
+      .enter()
+      .append("circle")
+      .attr("fill", "none")
+      .attr("stroke", "#666666")
+      .attr("stroke-width", 1)
+      .attr("stroke-dasharray", "4 3")
+      .attr("data-intersection", (d) => d.intersection)
+      .style("opacity", 0)
+      .style("pointer-events", "stroke")
+      .on("mouseover", function (event, d) {
+        intersectionGroups
+          .selectAll("circle")
+          .filter((g) => g.intersection === d.intersection)
+          .style("opacity", 1);
+      })
+      .on("mouseout", function () {
+        intersectionGroups.selectAll("circle").style("opacity", 0);
+      });
+
+    intersectionGroups.selectAll("circle").data(groupData, (d) => d.intersection)
+      .attr("cx", (d) => d.centerX)
+      .attr("cy", (d) => d.centerY)
+      .attr("r", (d) => d.radius)
+      .attr("data-intersection", (d) => d.intersection);
+
+    intersectionGroups.selectAll("circle").data(groupData, (d) => d.intersection).exit().remove();
+
     nodes
       .selectAll("circle")
       .data(graph.nodes)
@@ -129,9 +183,16 @@ const NetworkModule = function (svg_width, svg_height) {
           .html(d.tooltip)
           .style("left", event.pageX + "px")
           .style("top", event.pageY + "px");
+        if (d.intersection !== undefined) {
+          intersectionGroups
+            .selectAll("circle")
+            .filter((g) => g.intersection === d.intersection)
+            .style("opacity", 1);
+        }
       })
       .on("mouseout", function () {
         tooltip.transition().duration(500).style("opacity", 0);
+        intersectionGroups.selectAll("circle").style("opacity", 0);
       });
 
     nodes

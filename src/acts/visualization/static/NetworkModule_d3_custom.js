@@ -49,6 +49,7 @@ const NetworkModule = function (svg_width, svg_height) {
   const links = g.append("g").attr("class", "links");
   const intersectionGroups = g.append("g").attr("class", "intersection-groups");
   const nodes = g.append("g").attr("class", "nodes");
+  const vehicles = g.append("g").attr("class", "vehicles");
 
   this.render = (data) => {
     const graph = JSON.parse(JSON.stringify(data));
@@ -96,6 +97,7 @@ const NetworkModule = function (svg_width, svg_height) {
     }
 
     const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+    const edgeByDirection = new Map();
 
     graph.edges.forEach((edge) => {
       const sourceNode =
@@ -121,6 +123,12 @@ const NetworkModule = function (svg_width, svg_height) {
         directedGroups.set(directedKey, []);
       }
       directedGroups.get(directedKey).push(edge);
+    });
+
+    directedGroups.forEach((edges, directedKey) => {
+      if (edges.length > 0) {
+        edgeByDirection.set(directedKey, edges[0]);
+      }
     });
 
     const hasReverseDirection = new Set();
@@ -326,6 +334,100 @@ const NetworkModule = function (svg_width, svg_height) {
       });
 
     nodes.selectAll("circle").data(graph.nodes).exit().remove();
+
+    const vehicleData = Array.isArray(graph.vehicles) ? graph.vehicles : [];
+
+    const vehicleRenderData = vehicleData
+      .map((vehicle) => {
+        if (vehicle.mode === "edge") {
+          const sourceNode = nodeById.get(vehicle.from);
+          const targetNode = nodeById.get(vehicle.to);
+          if (!sourceNode || !targetNode) {
+            return null;
+          }
+
+          const x1 = sourceNode.renderX;
+          const y1 = sourceNode.renderY;
+          const x2 = targetNode.renderX;
+          const y2 = targetNode.renderY;
+
+          const dx = x2 - x1;
+          const dy = y2 - y1;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          if (!Number.isFinite(length) || length === 0) {
+            return null;
+          }
+
+          const ux = dx / length;
+          const uy = dy / length;
+          const nx = -uy;
+          const ny = ux;
+
+          const edgeKey = `${vehicle.from}->${vehicle.to}`;
+          const directionalEdge = edgeByDirection.get(edgeKey);
+          const laneOffset = Number.isFinite(directionalEdge?.parallelOffset)
+            ? directionalEdge.parallelOffset
+            : (Number.isFinite(vehicle.laneOffset) ? vehicle.laneOffset : 0);
+
+          const stopPadding = Number.isFinite(targetNode.size)
+            ? targetNode.size + 8
+            : 14;
+
+          const progressRaw = Number.isFinite(vehicle.progress) ? vehicle.progress : 0;
+          const progress = Math.min(Math.max(progressRaw, 0.02), 0.9);
+          const maxTravel = Math.max(length - stopPadding, 0);
+          const travel = progress * maxTravel;
+
+          return {
+            ...vehicle,
+            renderX: x1 + ux * travel + nx * laneOffset,
+            renderY: y1 + uy * travel + ny * laneOffset,
+          };
+        }
+
+        const node = nodeById.get(vehicle.node);
+        if (!node) {
+          return null;
+        }
+        return {
+          ...vehicle,
+          renderX: node.renderX,
+          renderY: node.renderY,
+        };
+      })
+      .filter(Boolean);
+
+    vehicles
+      .selectAll("circle")
+      .data(vehicleRenderData, (d) => d.id)
+      .enter()
+      .append("circle")
+      .attr("r", 3.5)
+      .attr("stroke", "#ffffff")
+      .attr("stroke-width", 1)
+      .on("mouseover", function (event, d) {
+        tooltip.transition().duration(120).style("opacity", 0.9);
+        tooltip
+          .html(d.tooltip || d.id)
+          .style("left", event.pageX + "px")
+          .style("top", event.pageY + "px");
+      })
+      .on("mouseout", function () {
+        tooltip.transition().duration(220).style("opacity", 0);
+      });
+
+    vehicles
+      .selectAll("circle")
+      .data(vehicleRenderData, (d) => d.id)
+      .attr("cx", (d) => d.renderX)
+      .attr("cy", (d) => d.renderY)
+      .attr("fill", (d) => (d.state === "DRIVING" ? "#1f77b4" : "#243b6b"));
+
+    vehicles
+      .selectAll("circle")
+      .data(vehicleRenderData, (d) => d.id)
+      .exit()
+      .remove();
   };
 
   this.reset = () => {};

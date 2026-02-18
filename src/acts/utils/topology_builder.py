@@ -1,0 +1,315 @@
+from __future__ import annotations
+
+import math
+import random
+from dataclasses import dataclass
+from typing import Optional
+
+import networkx as nx
+
+from acts.utils.topology_config import TopologyConfig
+
+
+@dataclass(frozen=True)
+class _IntersectionInfo:
+    node_id: int
+    row: int
+    col: int
+
+
+class TopologyBuilder:
+    def __init__(self, config: TopologyConfig, seed: Optional[int] = None):
+        self.config = config.normalized()
+        self.rng = random.Random(seed)
+
+    def build(self) -> nx.DiGraph:
+        base_pos = self._build_base_positions()
+        base_edges = self._build_connected_base_edges()
+        graph, neighbors_map, port_of = self._expand_intersections(base_pos, base_edges)
+        self._connect_roads(graph, base_edges, port_of)
+        self._connect_internal_turns(graph, neighbors_map, port_of)
+        self._enforce_strong_connectivity(graph)
+        self._set_graph_metadata(graph, base_pos, base_edges, neighbors_map)
+        return graph
+
+    def _build_base_positions(self) -> dict[int, tuple[float, float]]:
+        positions: dict[int, tuple[float, float]] = {}
+        cols = self.config.cols
+        rows = self.config.rows
+
+        for node_id in range(self.config.num_nodes):
+            row = node_id // cols
+            col = node_id % cols
+            x = col / max(cols - 1, 1)
+            y = row / max(rows - 1, 1)
+            positions[node_id] = (x, y)
+
+        return positions
+
+    def _build_connected_base_edges(self) -> list[tuple[int, int]]:
+        candidate_edges: list[tuple[int, int]] = []
+        for _ in range(self.config.max_connectivity_attempts):
+            candidate_edges = self._build_base_edges()
+            if self._is_base_connected(candidate_edges):
+                return candidate_edges
+
+        return candidate_edges
+
+    def _build_base_edges(self) -> list[tuple[int, int]]:
+        edges: list[tuple[int, int]] = []
+        cols = self.config.cols
+        rows = self.config.rows
+
+        for node_id in range(self.config.num_nodes):
+            intersection = _IntersectionInfo(node_id=node_id, row=node_id // cols, col=node_id % cols)
+
+            right = node_id + 1
+            down = node_id + cols
+            down_right = node_id + cols + 1
+            down_left = node_id + cols - 1
+
+            if (
+                intersection.col < cols - 1
+                and right < self.config.num_nodes
+                and self.rng.random() < self.config.road_probability
+            ):
+                edges.append((node_id, right))
+
+            if (
+                intersection.row < rows - 1
+                and down < self.config.num_nodes
+                and self.rng.random() < self.config.road_probability
+            ):
+                edges.append((node_id, down))
+
+            if (
+                intersection.row < rows - 1
+                and intersection.col < cols - 1
+                and down_right < self.config.num_nodes
+                and self.rng.random() < self.config.diagonal_road_probability
+            ):
+                edges.append((node_id, down_right))
+
+            if (
+                intersection.row < rows - 1
+                and intersection.col > 0
+                and down_left < self.config.num_nodes
+                and self.rng.random() < self.config.diagonal_road_probability
+            ):
+                edges.append((node_id, down_left))
+
+        return edges
+
+    def _is_base_connected(self, edges: list[tuple[int, int]]) -> bool:
+        if self.config.num_nodes <= 1:
+            return True
+
+        graph = nx.Graph()
+        graph.add_nodes_from(range(self.config.num_nodes))
+        graph.add_edges_from(edges)
+        return nx.is_connected(graph)
+
+    def _expand_intersections(
+        self,
+        base_pos: dict[int, tuple[float, float]],
+        base_edges: list[tuple[int, int]],
+    ) -> tuple[nx.DiGraph, dict[int, list[int]], dict[tuple[int, int], int]]:
+        graph = nx.DiGraph()
+        neighbors_map: dict[int, list[int]] = {n: [] for n in range(self.config.num_nodes)}
+
+        for u, v in base_edges:
+            neighbors_map[u].append(v)
+            neighbors_map[v].append(u)
+
+        port_of: dict[tuple[int, int], int] = {}
+        next_port_id = 0
+
+        for center in range(self.config.num_nodes):
+            cx, cy = base_pos[center]
+            local_neighbors = neighbors_map[center]
+
+            if len(local_neighbors) <= 2:
+                node_id = next_port_id
+                next_port_id += 1
+                graph.add_node(
+                    node_id,
+                    pos=(cx, cy),
+                    intersection=center,
+                    is_pass_through=True,
+                )
+                port_of[(center, -1)] = node_id
+                continue
+
+            for other in local_neighbors:
+                px, py = self._offset_position(base_pos[center], base_pos[other])
+                port_id = next_port_id
+                next_port_id += 1
+                graph.add_node(
+                    port_id,
+                    pos=(px, py),
+                    intersection=center,
+                    neighbor_intersection=other,
+                )
+                port_of[(center, other)] = port_id
+
+        return graph, neighbors_map, port_of
+
+    def _offset_position(
+        self,
+        center: tuple[float, float],
+        neighbor: tuple[float, float],
+    ) -> tuple[float, float]:
+        cx, cy = center
+        ox, oy = neighbor
+        dx = ox - cx
+        dy = oy - cy
+        norm = math.sqrt(dx * dx + dy * dy)
+        ux, uy = (0.0, 0.0) if norm == 0 else (dx / norm, dy / norm)
+
+        px = min(1.0, max(0.0, cx + ux * self.config.port_offset))
+        py = min(1.0, max(0.0, cy + uy * self.config.port_offset))
+        return px, py
+
+    def _connect_roads(
+        self,
+        graph: nx.DiGraph,
+        base_edges: list[tuple[int, int]],
+        port_of: dict[tuple[int, int], int],
+    ) -> None:
+        for u, v in base_edges:
+            u_pass_through = (u, -1) in port_of
+            v_pass_through = (v, -1) in port_of
+
+            if u_pass_through and v_pass_through:
+                self._add_random_connection(graph, port_of[(u, -1)], port_of[(v, -1)], edge_kind="road")
+                continue
+
+            if u_pass_through and (v, u) in port_of:
+                self._add_random_connection(graph, port_of[(u, -1)], port_of[(v, u)], edge_kind="road")
+                continue
+
+            if v_pass_through and (u, v) in port_of:
+                self._add_random_connection(graph, port_of[(u, v)], port_of[(v, -1)], edge_kind="road")
+                continue
+
+            if (u, v) in port_of and (v, u) in port_of:
+                self._add_random_connection(graph, port_of[(u, v)], port_of[(v, u)], edge_kind="road")
+
+    def _connect_internal_turns(
+        self,
+        graph: nx.DiGraph,
+        neighbors_map: dict[int, list[int]],
+        port_of: dict[tuple[int, int], int],
+    ) -> None:
+        for center in range(self.config.num_nodes):
+            local_neighbors = neighbors_map[center]
+            if len(local_neighbors) <= 2:
+                continue
+
+            local_ports = [port_of[(center, other)] for other in local_neighbors]
+            if len(local_ports) < 2:
+                continue
+
+            shuffled = local_ports[:]
+            self.rng.shuffle(shuffled)
+            for i in range(len(shuffled)):
+                self._add_random_connection(
+                    graph,
+                    shuffled[i],
+                    shuffled[(i + 1) % len(shuffled)],
+                    edge_kind="turn",
+                )
+
+            for i in range(len(local_ports)):
+                for j in range(i + 1, len(local_ports)):
+                    a, b = local_ports[i], local_ports[j]
+                    if graph.has_edge(a, b) or graph.has_edge(b, a):
+                        continue
+                    if self.rng.random() < self.config.extra_turn_probability:
+                        self._add_random_connection(graph, a, b, edge_kind="turn")
+
+    def _enforce_strong_connectivity(self, graph: nx.DiGraph) -> None:
+        if graph.number_of_nodes() <= 1:
+            return
+
+        max_rounds = graph.number_of_nodes() * self.config.reconnect_round_multiplier
+
+        for _ in range(max_rounds):
+            if nx.is_strongly_connected(graph):
+                return
+
+            sccs = list(nx.strongly_connected_components(graph))
+            condensation = nx.condensation(graph, sccs)
+            source_components = [c for c in condensation.nodes() if condensation.in_degree(c) == 0]
+            sink_components = [c for c in condensation.nodes() if condensation.out_degree(c) == 0]
+
+            if not source_components or not sink_components:
+                break
+
+            links_to_add = max(len(source_components), len(sink_components))
+            for i in range(links_to_add):
+                sink_comp = sink_components[i % len(sink_components)]
+                source_comp = source_components[(i + 1) % len(source_components)]
+
+                sink_member = next(iter(condensation.nodes[sink_comp]["members"]))
+                source_member = next(iter(condensation.nodes[source_comp]["members"]))
+                self._add_directed(graph, sink_member, source_member, edge_kind="reconnect")
+
+        if nx.is_strongly_connected(graph):
+            return
+
+        fallback_nodes = list(graph.nodes())
+        for i in range(len(fallback_nodes)):
+            self._add_directed(
+                graph,
+                fallback_nodes[i],
+                fallback_nodes[(i + 1) % len(fallback_nodes)],
+                edge_kind="reconnect",
+            )
+
+    def _set_graph_metadata(
+        self,
+        graph: nx.DiGraph,
+        base_pos: dict[int, tuple[float, float]],
+        base_edges: list[tuple[int, int]],
+        neighbors_map: dict[int, list[int]],
+    ) -> None:
+        intersections_meta = {}
+
+        for intersection_id in range(self.config.num_nodes):
+            intersection_nodes = [
+                node_id
+                for node_id, attrs in graph.nodes(data=True)
+                if attrs.get("intersection") == intersection_id
+            ]
+            intersections_meta[intersection_id] = {
+                "nodes": sorted(intersection_nodes),
+                "is_pass_through": len(neighbors_map[intersection_id]) <= 2,
+                "neighbor_intersections": sorted(neighbors_map[intersection_id]),
+                "position": base_pos[intersection_id],
+            }
+
+        graph.graph["base_intersection_count"] = self.config.num_nodes
+        graph.graph["roads"] = sorted(tuple(sorted((u, v))) for u, v in base_edges)
+        graph.graph["intersections"] = intersections_meta
+
+    def _add_random_connection(self, graph: nx.DiGraph, u: int, v: int, edge_kind: str) -> None:
+        if self.rng.random() < self.config.bidirectional_probability:
+            self._add_directed(graph, u, v, edge_kind=edge_kind)
+            self._add_directed(graph, v, u, edge_kind=edge_kind)
+            return
+
+        if self.rng.random() < 0.5:
+            self._add_directed(graph, u, v, edge_kind=edge_kind)
+        else:
+            self._add_directed(graph, v, u, edge_kind=edge_kind)
+
+    def _add_directed(self, graph: nx.DiGraph, u: int, v: int, edge_kind: str) -> None:
+        p1 = graph.nodes[u]["pos"]
+        p2 = graph.nodes[v]["pos"]
+        dist = math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
+
+        if graph.has_edge(u, v):
+            return
+
+        graph.add_edge(u, v, weight=dist, edge_kind=edge_kind)

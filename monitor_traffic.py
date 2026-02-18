@@ -29,6 +29,18 @@ def start_monitoring():
 
                 if evt == "DEPARTING":
                     print(f"{ts:<10} | {clock_str:<6} | Auto {agent:<5} | 💨 DRIVING {data['from']} -> {data['to']} ({data['duration']}s)")
+
+                elif evt == "PLANNING_ASTAR":
+                    print(f"{ts:<10} | {clock_str:<6} | Auto {agent:<5} | 🧭 A* target={data.get('dest')} steps={data.get('steps')}")
+
+                elif evt == "TL_REQUEST":
+                    print(f"{ts:<10} | {clock_str:<6} | Auto {agent:<5} | 📨 REQUEST TL_{data.get('target_intersection')} from {data.get('from_node')} to {data.get('to_node')}")
+
+                elif evt == "TL_WAIT":
+                    print(f"{ts:<10} | {clock_str:<6} | Auto {agent:<5} | ⛔ WAIT TL_{data.get('intersection')} from node {data.get('from_node')}")
+
+                elif evt == "LOCK_WAIT":
+                    print(f"{ts:<10} | {clock_str:<6} | Auto {agent:<5} | 🔒 WAIT LOCK node {data.get('node')} (I{data.get('intersection')})")
                 
                 elif evt == "ARRIVED_NODE":
                     # Opzionale: de-commenta se vuoi vedere ogni arrivo intermedio

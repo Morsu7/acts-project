@@ -11,7 +11,6 @@ from acts.agents.vehicle_logic.vehicle_state import VehicleRuntimeState
 
 from acts.utils.redis_utils import (
     create_redis_client,
-    get_json,
     release_lock_if_owner,
 )
 
@@ -158,23 +157,14 @@ class VehicleAgent(Agent):
         return self.pos
 
     def _can_depart_from_signal(self, current_node: int, next_node: int) -> bool:
-        if self.redis_client is None:
+        edge_data = self.model.G.get_edge_data(current_node, next_node) or {}
+        edge_state = edge_data.get("tl_state")
+
+        # Only traffic-light-controlled edges carry tl_state. If missing, treat as unconstrained road edge.
+        if edge_state is None:
             return True
 
-        current_intersection = self.model.G.nodes[current_node].get("intersection", current_node)
-        next_intersection = self.model.G.nodes[next_node].get("intersection", next_node)
-        if current_intersection == next_intersection:
-            return True
-
-        allowed_sources = get_json(
-            self.redis_client,
-            f"tl_{next_intersection}_allowed",
-            default=None,
-        )
-        if allowed_sources is None:
-            return True
-
-        return current_node in allowed_sources
+        return str(edge_state).upper() == "GREEN"
 
     def driving_logic(self):
         self.movement_service.drive_step()

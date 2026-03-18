@@ -42,6 +42,7 @@ class TrafficLightAgent(Agent):
         self.redis = create_redis_client()
         if self.redis:
             self.redis.delete(f"sensor_{self.intersection_id}")
+            self.redis.delete(f"tl_{self.intersection_id}_allowed")
         self.update_redis()
 
     def step(self):

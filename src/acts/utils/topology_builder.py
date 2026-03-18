@@ -128,7 +128,7 @@ class TopologyBuilder:
             cx, cy = base_pos[center]
             local_neighbors = neighbors_map[center]
 
-            if len(local_neighbors) <= 2:
+            if not local_neighbors:
                 node_id = next_port_id
                 next_port_id += 1
                 graph.add_node(
@@ -203,11 +203,16 @@ class TopologyBuilder:
     ) -> None:
         for center in range(self.config.num_nodes):
             local_neighbors = neighbors_map[center]
-            if len(local_neighbors) <= 2:
+            if len(local_neighbors) <= 1:
                 continue
 
             local_ports = [port_of[(center, other)] for other in local_neighbors]
             if len(local_ports) < 2:
+                continue
+
+            if len(local_ports) == 2:
+                self._add_directed(graph, local_ports[0], local_ports[1], edge_kind="turn")
+                self._add_directed(graph, local_ports[1], local_ports[0], edge_kind="turn")
                 continue
 
             shuffled = local_ports[:]

@@ -63,49 +63,46 @@ def network_portrayal(G):
     for source, target in G.edges():
         source_intersection = G.nodes[source].get("intersection", source)
         target_intersection = G.nodes[target].get("intersection", target)
+        edge_data = G.get_edge_data(source, target) or {}
 
         if source_intersection != target_intersection:
             edge_color = '#000000'
         else:
-            source_tl_state = G.nodes[source].get("tl_state", "GREEN")
-            edge_color = '#00B050' if source_tl_state == "GREEN" else '#D7263D'
+            edge_tl_state = edge_data.get("tl_state", "RED")
+            edge_color = '#00B050' if edge_tl_state == "GREEN" else '#D7263D'
+
+        waiting_cars_raw = int(edge_data.get("tl_waiting_cars_raw", 0))
+        waiting_seconds_raw = int(edge_data.get("tl_waiting_seconds_raw", 0))
+        waiting_cars_score = float(edge_data.get("tl_waiting_cars_score", 0.0))
+        waiting_time_score = float(edge_data.get("tl_waiting_time_score", 0.0))
+        priority_score = float(edge_data.get("tl_priority_score", 0.0))
+        edge_tooltip = (
+            f"Arco {source}->{target}"
+            f"<br>Raw queued cars: {waiting_cars_raw}"
+            f"<br>Raw waiting seconds: {waiting_seconds_raw}"
+            f"<br>Score waiting cars: {waiting_cars_score:.2f}"
+            f"<br>Score waiting time: {waiting_time_score:.2f}"
+            f"<br>Priority score: {priority_score:.2f}"
+        )
 
         portrayal['edges'].append({
             'source': source, 'target': target,
-            'color': edge_color, 'width': 1,
+            'color': edge_color,
+            'width': 1.4 if source_intersection == target_intersection else 1,
+            'tooltip': edge_tooltip,
         })
 
     for node in G.nodes():
         agents = G.nodes[node].get("agent", [])
         pos = G.nodes[node].get("pos", (0.0, 0.0))
-        node_tl_state = G.nodes[node].get("tl_state", "GREEN")
-        node_waiting_cars_raw = int(G.nodes[node].get("tl_waiting_cars_raw", 0))
-        node_waiting_seconds_raw = int(G.nodes[node].get("tl_waiting_seconds_raw", 0))
-        node_waiting_cars_score = float(G.nodes[node].get("tl_waiting_cars_score", 0.0))
-        node_waiting_time_score = float(G.nodes[node].get("tl_waiting_time_score", 0.0))
-        node_priority_score = float(G.nodes[node].get("tl_priority_score", 0.0))
         intersection_id = G.nodes[node].get("intersection", node)
         
         cars = [a for a in agents if _is_vehicle_agent(a)]
         
-        # Semaforo: stato per nodo
-        effective_state = node_tl_state
-        if effective_state == "GREEN":
-            color = "#00B050"
-        elif effective_state == "RED":
-            color = "#D7263D"
-        else:
-            color = "#777777"
+        color = "#777777"
 
         size = 6
-        tooltip = (
-            f"Nodo {node}<br>Incrocio: {intersection_id}<br>Stato: {effective_state}"
-            f"<br>Raw queued cars: {node_waiting_cars_raw}"
-            f"<br>Raw waiting seconds: {node_waiting_seconds_raw}"
-            f"<br>Score waiting cars: {node_waiting_cars_score:.2f}"
-            f"<br>Score waiting time: {node_waiting_time_score:.2f}"
-            f"<br>Priority score: {node_priority_score:.2f}"
-        )
+        tooltip = f"Nodo {node}<br>Incrocio: {intersection_id}<br>Stop line"
 
         if cars:
             tooltip += f"<br>Auto nel nodo: {len(cars)}"

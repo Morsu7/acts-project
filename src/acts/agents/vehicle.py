@@ -7,7 +7,6 @@ from mesa import Agent
 
 from acts.utils.redis_utils import (
     create_redis_client,
-    get_json,
     hash_increment,
     publish_json,
     release_lock_if_owner,
@@ -106,11 +105,12 @@ class VehicleAgent(Agent):
     ) -> bool:
         internal_crossing = current_intersection == next_intersection
         if internal_crossing:
-            source_tl_state = self.model.G.nodes[current_node].get("tl_state", "GREEN")
-            if source_tl_state != "GREEN":
+            edge_tl_state = (self.model.G.get_edge_data(current_node, next_node) or {}).get("tl_state", "RED")
+            if edge_tl_state != "GREEN":
                 self.publish_event("TL_WAIT", {
                     "intersection": current_intersection,
                     "from_node": current_node,
+                    "to_node": next_node,
                 })
                 return False
 

@@ -2,16 +2,11 @@ from mesa.visualization.ModularVisualization import ModularServer
 from mesa.visualization.UserParam import Slider
 from acts.core.simulation import CityModel
 from acts.agents.vehicle import VehicleAgent
-from acts.agents.infrastructure import TrafficLightAgent
 from acts.visualization.network_module_custom import CustomNetworkModule
 
 
 def _is_vehicle_agent(agent):
     return isinstance(agent, VehicleAgent) or agent.__class__.__name__ == "VehicleAgent"
-
-
-def _is_traffic_light_agent(agent):
-    return isinstance(agent, TrafficLightAgent) or agent.__class__.__name__ == "TrafficLightAgent"
 
 
 def _compute_vehicle_marker(car, current_node, G):
@@ -52,16 +47,8 @@ def _compute_vehicle_marker(car, current_node, G):
         return base
 
     if car.state == "QUEUED" and external_entry:
-        base.update(
-            {
-                "mode": "edge",
-                "from": current_node,
-                "to": next_node,
-                "progress": 0.82,
-                "laneOffset": 4,
-                "tooltip": f"Auto {car.unique_id}<br>Stato: ATTESA SEMAFORO",
-            }
-        )
+        base["mode"] = "node"
+        base["tooltip"] = f"Auto {car.unique_id}<br>Stato: IN CODA"
         return base
 
     base["mode"] = "node"
@@ -74,31 +61,56 @@ def network_portrayal(G):
     portrayal['vehicles'] = []
 
     for source, target in G.edges():
+        source_intersection = G.nodes[source].get("intersection", source)
+        target_intersection = G.nodes[target].get("intersection", target)
+        edge_data = G.get_edge_data(source, target) or {}
+        internal_edge = source_intersection == target_intersection
+
+        if not internal_edge:
+            edge_color = '#000000'
+            edge_tooltip = None
+            constraint_group = None
+        else:
+            edge_tl_state = edge_data.get("tl_state", "RED")
+            edge_color = '#00B050' if edge_tl_state == "GREEN" else '#D7263D'
+            waiting_cars_raw = int(edge_data.get("tl_waiting_cars_raw", 0))
+            waiting_seconds_raw = int(edge_data.get("tl_waiting_seconds_raw", 0))
+            waiting_cars_score = float(edge_data.get("tl_waiting_cars_score", 0.0))
+            waiting_time_score = float(edge_data.get("tl_waiting_time_score", 0.0))
+            priority_score = float(edge_data.get("tl_priority_score", 0.0))
+            constraint_group = edge_data.get("tl_constraint_group")
+            group_priority_score = float(edge_data.get("tl_group_score", 0.0))
+            edge_tooltip = (
+                f"Arco {source}->{target}"
+                f"<br>Constraint group: {constraint_group if constraint_group is not None else '-'}"
+                f"<br>Raw queued cars: {waiting_cars_raw}"
+                f"<br>Raw waiting seconds: {waiting_seconds_raw}"
+                f"<br>Score waiting cars: {waiting_cars_score:.2f}"
+                f"<br>Score waiting time: {waiting_time_score:.2f}"
+                f"<br>Priority score: {priority_score:.2f}"
+                f"<br>Group summed score: {group_priority_score:.2f}"
+            )
+
         portrayal['edges'].append({
             'source': source, 'target': target,
-            'color': '#000000', 'width': 1,
+            'color': edge_color,
+            'width': 1.4 if source_intersection == target_intersection else 1,
+            'tooltip': edge_tooltip,
+            'constraintGroup': constraint_group,
+            'hoverable': internal_edge,
         })
 
     for node in G.nodes():
         agents = G.nodes[node].get("agent", [])
         pos = G.nodes[node].get("pos", (0.0, 0.0))
-        node_tl_state = G.nodes[node].get("tl_state", "GREEN")
         intersection_id = G.nodes[node].get("intersection", node)
         
-        tl = next((a for a in agents if _is_traffic_light_agent(a)), None)
         cars = [a for a in agents if _is_vehicle_agent(a)]
         
-        # Semaforo: colore stabile legato solo allo stato infrastrutturale
-        effective_state = tl.state if tl else node_tl_state
-        if effective_state == "GREEN":
-            color = "#00B050"
-        elif effective_state == "RED":
-            color = "#D7263D"
-        else:
-            color = "#777777"
+        color = "#777777"
 
         size = 6
-        tooltip = f"Nodo {node}<br>Incrocio: {intersection_id}<br>Stato: {effective_state}"
+        tooltip = f"Nodo {node}<br>Incrocio: {intersection_id}<br>Stop line"
 
         if cars:
             tooltip += f"<br>Auto nel nodo: {len(cars)}"

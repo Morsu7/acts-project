@@ -19,9 +19,10 @@ class CityModel(Model):
         self.running = True
 
         nodes = list(self.G.nodes())
+        self.intersection_meta = self.G.graph.get("intersections", {})
         self.intersection_nodes = {
             intersection_id: list(meta["nodes"])
-            for intersection_id, meta in self.G.graph.get("intersections", {}).items()
+            for intersection_id, meta in self.intersection_meta.items()
         }
         if not self.intersection_nodes:
             for node in nodes:
@@ -30,7 +31,14 @@ class CityModel(Model):
 
         # 3. Agenti
         for intersection_id, controlled_nodes in self.intersection_nodes.items():
-            tl = TrafficLightAgent(f"TL_{intersection_id}", self, intersection_id, controlled_nodes)
+            meta = self.intersection_meta.get(intersection_id, {})
+            tl = TrafficLightAgent(
+                f"TL_{intersection_id}",
+                self,
+                intersection_id,
+                controlled_nodes,
+                intersection_meta=meta,
+            )
             self.schedule.add(tl)
             self.grid.place_agent(tl, controlled_nodes[0])
             for node in controlled_nodes:

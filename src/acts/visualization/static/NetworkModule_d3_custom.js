@@ -33,23 +33,84 @@ const NetworkModule = function (svg_width, svg_height) {
   );
 
   const defs = svg.append("defs");
-  defs
-    .append("marker")
-    .attr("id", "edge-arrow")
-    .attr("viewBox", "0 -5 10 10")
-    .attr("refX", 10)
-    .attr("refY", 0)
-    .attr("markerWidth", 6)
-    .attr("markerHeight", 6)
-    .attr("orient", "auto")
-    .append("path")
-    .attr("d", "M0,-5L10,0L0,5")
-    .attr("fill", "#000000");
+  const markerColors = [
+    { suffix: "black", color: "#000000" },
+    { suffix: "red", color: "#D7263D" },
+    { suffix: "green", color: "#00B050" },
+  ];
+
+  markerColors.forEach(({ suffix, color }) => {
+    [
+      { id: `edge-arrow-${suffix}`, size: 4, refX: 8 },
+      { id: `edge-arrow-${suffix}-hover`, size: 5.8, refX: 9.6 },
+    ].forEach(({ id, size, refX }) => {
+    defs
+      .append("marker")
+      .attr("id", id)
+      .attr("viewBox", "0 -5 10 10")
+      .attr("markerUnits", "userSpaceOnUse")
+      .attr("refX", refX)
+      .attr("refY", 0)
+      .attr("markerWidth", size)
+      .attr("markerHeight", size)
+      .attr("orient", "auto")
+      .append("path")
+      .attr("d", "M0,-5L10,0L0,5")
+      .attr("fill", color);
+    });
+  });
 
   const links = g.append("g").attr("class", "links");
   const intersectionGroups = g.append("g").attr("class", "intersection-groups");
   const nodes = g.append("g").attr("class", "nodes");
   const vehicles = g.append("g").attr("class", "vehicles");
+  let hoveredEdgeKey = null;
+  let hoveredConstraintGroup = null;
+
+  const edgeKeyOf = (edge) => {
+    const sourceId = edge && edge.sourceNode ? edge.sourceNode.id : (typeof edge.source === "object" ? edge.source.id : edge.source);
+    const targetId = edge && edge.targetNode ? edge.targetNode.id : (typeof edge.target === "object" ? edge.target.id : edge.target);
+    return `${sourceId}->${targetId}`;
+  };
+
+  const markerUrlForEdge = (edge, hovered = false) => {
+    const suffix = hovered ? "-hover" : "";
+    if (edge.color === "#00B050") {
+      return `url(#edge-arrow-green${suffix})`;
+    }
+    if (edge.color === "#D7263D") {
+      return `url(#edge-arrow-red${suffix})`;
+    }
+    return `url(#edge-arrow-black${suffix})`;
+  };
+
+  const isEdgeHighlighted = (edge) => {
+    if (edge.hoverable === false) {
+      return false;
+    }
+    if (hoveredConstraintGroup !== null && edge.constraintGroup !== undefined && edge.constraintGroup !== null) {
+      return edge.constraintGroup === hoveredConstraintGroup;
+    }
+    if (hoveredEdgeKey !== null) {
+      return edge.edgeKey === hoveredEdgeKey;
+    }
+    return false;
+  };
+
+  const clearEdgeHover = () => {
+    hoveredEdgeKey = null;
+    hoveredConstraintGroup = null;
+    links.selectAll("line")
+      .attr("stroke-width", (d) => (Number.isFinite(d.width) ? d.width : 1))
+      .attr("marker-end", (edge) => markerUrlForEdge(edge, false));
+    tooltip.interrupt().style("opacity", 0);
+  };
+
+  svg.on("mouseleave", function () {
+    if (hoveredEdgeKey !== null) {
+      clearEdgeHover();
+    }
+  });
 
   this.render = (data) => {
     const graph = JSON.parse(JSON.stringify(data));
@@ -107,6 +168,7 @@ const NetworkModule = function (svg_width, svg_height) {
 
       edge.sourceNode = sourceNode;
       edge.targetNode = targetNode;
+      edge.edgeKey = edgeKeyOf(edge);
     });
 
     const laneSpacing = 5;
@@ -230,13 +292,69 @@ const NetworkModule = function (svg_width, svg_height) {
         return Number.isFinite(d.renderY2) ? d.renderY2 : 0;
       })
       .attr("stroke-width", function (d) {
-        return d.width;
+        const baseWidth = Number.isFinite(d.width) ? d.width : 1;
+        return isEdgeHighlighted(d) ? baseWidth + 1.5 : baseWidth;
       })
       .attr("stroke", function (d) {
         return d.color;
       })
-      .attr("marker-end", function () {
-        return "url(#edge-arrow)";
+      .attr("pointer-events", "stroke")
+      .style("cursor", function (d) {
+        return d.hoverable === false ? "default" : "pointer";
+      })
+      .attr("marker-end", (d) => markerUrlForEdge(d, isEdgeHighlighted(d)))
+      .on("mouseover", function (event, d) {
+        if (d.hoverable === false) {
+          return;
+        }
+        hoveredEdgeKey = d.edgeKey;
+        hoveredConstraintGroup = (d.constraintGroup !== undefined && d.constraintGroup !== null)
+          ? d.constraintGroup
+          : null;
+
+        links.selectAll("line")
+          .attr("stroke-width", function (edge) {
+            const baseWidth = Number.isFinite(edge.width) ? edge.width : 1;
+            return isEdgeHighlighted(edge) ? baseWidth + 1.5 : baseWidth;
+          })
+          .attr("marker-end", (edge) => markerUrlForEdge(edge, isEdgeHighlighted(edge)));
+
+        if (!d.tooltip) {
+          return;
+        }
+        tooltip.interrupt().style("opacity", 0.9);
+        tooltip
+          .html(d.tooltip)
+          .style("left", event.pageX + "px")
+          .style("top", event.pageY + "px");
+      })
+      .on("mousemove", function (event, d) {
+        if (d.hoverable === false) {
+          return;
+        }
+        if (!d.tooltip) {
+          return;
+        }
+        tooltip
+          .style("left", event.pageX + "px")
+          .style("top", event.pageY + "px");
+      })
+      .on("mouseout", function (event, d) {
+        if (d.hoverable === false) {
+          return;
+        }
+        const nextTarget = event.relatedTarget;
+        const movingToEdge = nextTarget
+          && nextTarget.tagName
+          && nextTarget.tagName.toLowerCase() === "line"
+          && (() => {
+            const nextData = d3.select(nextTarget).datum();
+            return !!nextData && nextData.hoverable !== false;
+          })();
+
+        if (!movingToEdge) {
+          clearEdgeHover();
+        }
       });
 
     links.selectAll("line").data(graph.edges).exit().remove();

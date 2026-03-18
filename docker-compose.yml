@@ -1,10 +1,26 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: acts_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
   simulation:
     build: .
     container_name: acts_simulation
+    depends_on:
+      - redis
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     ports:
       - "8521:8521"
     volumes:
       # Mounts source code for live-reloading during development
       - ./src:/app
     command: python -m acts.visualization.server
+
+volumes:
+  redis_data:

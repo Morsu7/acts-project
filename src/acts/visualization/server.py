@@ -2,16 +2,11 @@ from mesa.visualization.ModularVisualization import ModularServer
 from mesa.visualization.UserParam import Slider
 from acts.core.simulation import CityModel
 from acts.agents.vehicle import VehicleAgent
-from acts.agents.infrastructure import TrafficLightAgent
 from acts.visualization.network_module_custom import CustomNetworkModule
 
 
 def _is_vehicle_agent(agent):
     return isinstance(agent, VehicleAgent) or agent.__class__.__name__ == "VehicleAgent"
-
-
-def _is_traffic_light_agent(agent):
-    return isinstance(agent, TrafficLightAgent) or agent.__class__.__name__ == "TrafficLightAgent"
 
 
 def _compute_vehicle_marker(car, current_node, G):
@@ -52,16 +47,8 @@ def _compute_vehicle_marker(car, current_node, G):
         return base
 
     if car.state == "QUEUED" and external_entry:
-        base.update(
-            {
-                "mode": "edge",
-                "from": current_node,
-                "to": next_node,
-                "progress": 0.82,
-                "laneOffset": 4,
-                "tooltip": f"Auto {car.unique_id}<br>Stato: ATTESA SEMAFORO",
-            }
-        )
+        base["mode"] = "node"
+        base["tooltip"] = f"Auto {car.unique_id}<br>Stato: IN CODA"
         return base
 
     base["mode"] = "node"
@@ -74,22 +61,35 @@ def network_portrayal(G):
     portrayal['vehicles'] = []
 
     for source, target in G.edges():
+        source_intersection = G.nodes[source].get("intersection", source)
+        target_intersection = G.nodes[target].get("intersection", target)
+
+        if source_intersection != target_intersection:
+            edge_color = '#000000'
+        else:
+            source_tl_state = G.nodes[source].get("tl_state", "GREEN")
+            edge_color = '#00B050' if source_tl_state == "GREEN" else '#D7263D'
+
         portrayal['edges'].append({
             'source': source, 'target': target,
-            'color': '#000000', 'width': 1,
+            'color': edge_color, 'width': 1,
         })
 
     for node in G.nodes():
         agents = G.nodes[node].get("agent", [])
         pos = G.nodes[node].get("pos", (0.0, 0.0))
         node_tl_state = G.nodes[node].get("tl_state", "GREEN")
+        node_waiting_cars_raw = int(G.nodes[node].get("tl_waiting_cars_raw", 0))
+        node_waiting_seconds_raw = int(G.nodes[node].get("tl_waiting_seconds_raw", 0))
+        node_waiting_cars_score = float(G.nodes[node].get("tl_waiting_cars_score", 0.0))
+        node_waiting_time_score = float(G.nodes[node].get("tl_waiting_time_score", 0.0))
+        node_priority_score = float(G.nodes[node].get("tl_priority_score", 0.0))
         intersection_id = G.nodes[node].get("intersection", node)
         
-        tl = next((a for a in agents if _is_traffic_light_agent(a)), None)
         cars = [a for a in agents if _is_vehicle_agent(a)]
         
-        # Semaforo: colore stabile legato solo allo stato infrastrutturale
-        effective_state = tl.state if tl else node_tl_state
+        # Semaforo: stato per nodo
+        effective_state = node_tl_state
         if effective_state == "GREEN":
             color = "#00B050"
         elif effective_state == "RED":
@@ -98,7 +98,14 @@ def network_portrayal(G):
             color = "#777777"
 
         size = 6
-        tooltip = f"Nodo {node}<br>Incrocio: {intersection_id}<br>Stato: {effective_state}"
+        tooltip = (
+            f"Nodo {node}<br>Incrocio: {intersection_id}<br>Stato: {effective_state}"
+            f"<br>Raw queued cars: {node_waiting_cars_raw}"
+            f"<br>Raw waiting seconds: {node_waiting_seconds_raw}"
+            f"<br>Score waiting cars: {node_waiting_cars_score:.2f}"
+            f"<br>Score waiting time: {node_waiting_time_score:.2f}"
+            f"<br>Priority score: {node_priority_score:.2f}"
+        )
 
         if cars:
             tooltip += f"<br>Auto nel nodo: {len(cars)}"

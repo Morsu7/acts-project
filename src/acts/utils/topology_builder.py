@@ -282,8 +282,15 @@ class TopologyBuilder:
                 for node_id, attrs in graph.nodes(data=True)
                 if attrs.get("intersection") == intersection_id
             ]
+            sorted_nodes = sorted(intersection_nodes)
             intersections_meta[intersection_id] = {
-                "nodes": sorted(intersection_nodes),
+                "nodes": sorted_nodes,
+                "priority_nodes": sorted_nodes,
+                "min_green_duration": 5,
+                "priority_weights": {
+                    "waiting_cars": 1.0,
+                    "waiting_seconds": 1.0,
+                },
                 "is_pass_through": len(neighbors_map[intersection_id]) <= 2,
                 "neighbor_intersections": sorted(neighbors_map[intersection_id]),
                 "position": base_pos[intersection_id],

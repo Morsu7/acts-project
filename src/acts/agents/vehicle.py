@@ -104,20 +104,15 @@ class VehicleAgent(Agent):
         current_intersection: int,
         next_intersection: int,
     ) -> bool:
-        external_entry = current_intersection != next_intersection
-        if not external_entry:
-            return True
-
-        if self.redis_client is None:
-            return True
-
-        allowed_sources = get_json(self.redis_client, f"tl_{next_intersection}_allowed", default=[])
-        if current_node not in allowed_sources:
-            self.publish_event("TL_WAIT", {
-                "intersection": next_intersection,
-                "from_node": current_node,
-            })
-            return False
+        internal_crossing = current_intersection == next_intersection
+        if internal_crossing:
+            source_tl_state = self.model.G.nodes[current_node].get("tl_state", "GREEN")
+            if source_tl_state != "GREEN":
+                self.publish_event("TL_WAIT", {
+                    "intersection": current_intersection,
+                    "from_node": current_node,
+                })
+                return False
 
         lock_key = f"lock_node_{next_node}"
         if not try_acquire_lock(

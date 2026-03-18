@@ -64,32 +64,40 @@ def network_portrayal(G):
         source_intersection = G.nodes[source].get("intersection", source)
         target_intersection = G.nodes[target].get("intersection", target)
         edge_data = G.get_edge_data(source, target) or {}
+        internal_edge = source_intersection == target_intersection
 
-        if source_intersection != target_intersection:
+        if not internal_edge:
             edge_color = '#000000'
+            edge_tooltip = None
+            constraint_group = None
         else:
             edge_tl_state = edge_data.get("tl_state", "RED")
             edge_color = '#00B050' if edge_tl_state == "GREEN" else '#D7263D'
-
-        waiting_cars_raw = int(edge_data.get("tl_waiting_cars_raw", 0))
-        waiting_seconds_raw = int(edge_data.get("tl_waiting_seconds_raw", 0))
-        waiting_cars_score = float(edge_data.get("tl_waiting_cars_score", 0.0))
-        waiting_time_score = float(edge_data.get("tl_waiting_time_score", 0.0))
-        priority_score = float(edge_data.get("tl_priority_score", 0.0))
-        edge_tooltip = (
-            f"Arco {source}->{target}"
-            f"<br>Raw queued cars: {waiting_cars_raw}"
-            f"<br>Raw waiting seconds: {waiting_seconds_raw}"
-            f"<br>Score waiting cars: {waiting_cars_score:.2f}"
-            f"<br>Score waiting time: {waiting_time_score:.2f}"
-            f"<br>Priority score: {priority_score:.2f}"
-        )
+            waiting_cars_raw = int(edge_data.get("tl_waiting_cars_raw", 0))
+            waiting_seconds_raw = int(edge_data.get("tl_waiting_seconds_raw", 0))
+            waiting_cars_score = float(edge_data.get("tl_waiting_cars_score", 0.0))
+            waiting_time_score = float(edge_data.get("tl_waiting_time_score", 0.0))
+            priority_score = float(edge_data.get("tl_priority_score", 0.0))
+            constraint_group = edge_data.get("tl_constraint_group")
+            group_priority_score = float(edge_data.get("tl_group_score", 0.0))
+            edge_tooltip = (
+                f"Arco {source}->{target}"
+                f"<br>Constraint group: {constraint_group if constraint_group is not None else '-'}"
+                f"<br>Raw queued cars: {waiting_cars_raw}"
+                f"<br>Raw waiting seconds: {waiting_seconds_raw}"
+                f"<br>Score waiting cars: {waiting_cars_score:.2f}"
+                f"<br>Score waiting time: {waiting_time_score:.2f}"
+                f"<br>Priority score: {priority_score:.2f}"
+                f"<br>Group summed score: {group_priority_score:.2f}"
+            )
 
         portrayal['edges'].append({
             'source': source, 'target': target,
             'color': edge_color,
             'width': 1.4 if source_intersection == target_intersection else 1,
             'tooltip': edge_tooltip,
+            'constraintGroup': constraint_group,
+            'hoverable': internal_edge,
         })
 
     for node in G.nodes():

@@ -283,9 +283,11 @@ class TopologyBuilder:
                 if attrs.get("intersection") == intersection_id
             ]
             sorted_nodes = sorted(intersection_nodes)
+            priority_edge_groups = self._build_random_edge_groups(graph, sorted_nodes)
             intersections_meta[intersection_id] = {
                 "nodes": sorted_nodes,
                 "priority_nodes": sorted_nodes,
+                "priority_edge_groups": priority_edge_groups,
                 "min_green_duration": 5,
                 "priority_weights": {
                     "waiting_cars": 1.0,
@@ -299,6 +301,53 @@ class TopologyBuilder:
         graph.graph["base_intersection_count"] = self.config.num_nodes
         graph.graph["roads"] = sorted(tuple(sorted((u, v))) for u, v in base_edges)
         graph.graph["intersections"] = intersections_meta
+
+    def _build_random_edge_groups(
+        self,
+        graph: nx.DiGraph,
+        intersection_nodes: list[int],
+    ) -> list[list[list[int]]]:
+        nodes_set = set(intersection_nodes)
+        groups: list[list[list[int]]] = []
+
+        for source_node in intersection_nodes:
+            outgoing = [
+                target_node
+                for _, target_node in graph.out_edges(source_node)
+                if target_node in nodes_set
+            ]
+            outgoing = sorted(outgoing)
+
+            if not outgoing:
+                continue
+
+            partitions = self._partition_targets_randomly(outgoing)
+            for partition in partitions:
+                groups.append([[source_node, target_node] for target_node in partition])
+
+        return groups
+
+    def _partition_targets_randomly(self, targets: list[int]) -> list[list[int]]:
+        if not targets:
+            return []
+
+        if len(targets) == 1:
+            return [targets[:]]
+
+        shuffled = targets[:]
+        self.rng.shuffle(shuffled)
+
+        max_groups = len(shuffled)
+        num_groups = self.rng.randint(1, max_groups)
+
+        partitions: list[list[int]] = [[] for _ in range(num_groups)]
+        for index, target in enumerate(shuffled):
+            partitions[index % num_groups].append(target)
+
+        for partition in partitions:
+            partition.sort()
+
+        return partitions
 
     def _add_random_connection(self, graph: nx.DiGraph, u: int, v: int, edge_kind: str) -> None:
         if self.rng.random() < self.config.bidirectional_probability:

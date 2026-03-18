@@ -65,6 +65,7 @@ const NetworkModule = function (svg_width, svg_height) {
   const nodes = g.append("g").attr("class", "nodes");
   const vehicles = g.append("g").attr("class", "vehicles");
   let hoveredEdgeKey = null;
+  let hoveredConstraintGroup = null;
 
   const edgeKeyOf = (edge) => {
     const sourceId = edge && edge.sourceNode ? edge.sourceNode.id : (typeof edge.source === "object" ? edge.source.id : edge.source);
@@ -72,25 +73,41 @@ const NetworkModule = function (svg_width, svg_height) {
     return `${sourceId}->${targetId}`;
   };
 
-  const clearEdgeHover = () => {
-    hoveredEdgeKey = null;
-    links.selectAll("line")
-      .attr("stroke-width", (d) => (Number.isFinite(d.width) ? d.width : 1))
-      .attr("marker-end", function (edge) {
-        if (edge.color === "#00B050") {
-          return "url(#edge-arrow-green)";
-        }
-        if (edge.color === "#D7263D") {
-          return "url(#edge-arrow-red)";
-        }
-        return "url(#edge-arrow-black)";
-      });
-    tooltip.transition().duration(120).style("opacity", 0);
+  const markerUrlForEdge = (edge, hovered = false) => {
+    const suffix = hovered ? "-hover" : "";
+    if (edge.color === "#00B050") {
+      return `url(#edge-arrow-green${suffix})`;
+    }
+    if (edge.color === "#D7263D") {
+      return `url(#edge-arrow-red${suffix})`;
+    }
+    return `url(#edge-arrow-black${suffix})`;
   };
 
-  svg.on("mousemove", function (event) {
-    const overEdgeLine = event.target && event.target.tagName && event.target.tagName.toLowerCase() === "line";
-    if (!overEdgeLine && hoveredEdgeKey !== null) {
+  const isEdgeHighlighted = (edge) => {
+    if (edge.hoverable === false) {
+      return false;
+    }
+    if (hoveredConstraintGroup !== null && edge.constraintGroup !== undefined && edge.constraintGroup !== null) {
+      return edge.constraintGroup === hoveredConstraintGroup;
+    }
+    if (hoveredEdgeKey !== null) {
+      return edge.edgeKey === hoveredEdgeKey;
+    }
+    return false;
+  };
+
+  const clearEdgeHover = () => {
+    hoveredEdgeKey = null;
+    hoveredConstraintGroup = null;
+    links.selectAll("line")
+      .attr("stroke-width", (d) => (Number.isFinite(d.width) ? d.width : 1))
+      .attr("marker-end", (edge) => markerUrlForEdge(edge, false));
+    tooltip.interrupt().style("opacity", 0);
+  };
+
+  svg.on("mouseleave", function () {
+    if (hoveredEdgeKey !== null) {
       clearEdgeHover();
     }
   });
@@ -276,47 +293,45 @@ const NetworkModule = function (svg_width, svg_height) {
       })
       .attr("stroke-width", function (d) {
         const baseWidth = Number.isFinite(d.width) ? d.width : 1;
-        return d.edgeKey === hoveredEdgeKey ? baseWidth + 2 : baseWidth;
+        return isEdgeHighlighted(d) ? baseWidth + 1.5 : baseWidth;
       })
       .attr("stroke", function (d) {
         return d.color;
       })
       .attr("pointer-events", "stroke")
-      .style("cursor", "pointer")
-      .attr("marker-end", function (d) {
-        if (d.color === "#00B050") {
-          return "url(#edge-arrow-green)";
-        }
-        if (d.color === "#D7263D") {
-          return "url(#edge-arrow-red)";
-        }
-        return "url(#edge-arrow-black)";
+      .style("cursor", function (d) {
+        return d.hoverable === false ? "default" : "pointer";
       })
+      .attr("marker-end", (d) => markerUrlForEdge(d, isEdgeHighlighted(d)))
       .on("mouseover", function (event, d) {
+        if (d.hoverable === false) {
+          return;
+        }
         hoveredEdgeKey = d.edgeKey;
-        d3.select(this)
-          .attr("stroke-width", (Number.isFinite(d.width) ? d.width : 1) + 1.5)
-          .attr("marker-end", function (edge) {
-            if (edge.color === "#00B050") {
-              return "url(#edge-arrow-green-hover)";
-            }
-            if (edge.color === "#D7263D") {
-              return "url(#edge-arrow-red-hover)";
-            }
-            return "url(#edge-arrow-black-hover)";
+        hoveredConstraintGroup = (d.constraintGroup !== undefined && d.constraintGroup !== null)
+          ? d.constraintGroup
+          : null;
+
+        links.selectAll("line")
+          .attr("stroke-width", function (edge) {
+            const baseWidth = Number.isFinite(edge.width) ? edge.width : 1;
+            return isEdgeHighlighted(edge) ? baseWidth + 1.5 : baseWidth;
           })
-          .raise();
+          .attr("marker-end", (edge) => markerUrlForEdge(edge, isEdgeHighlighted(edge)));
 
         if (!d.tooltip) {
           return;
         }
-        tooltip.transition().duration(200).style("opacity", 0.9);
+        tooltip.interrupt().style("opacity", 0.9);
         tooltip
           .html(d.tooltip)
           .style("left", event.pageX + "px")
           .style("top", event.pageY + "px");
       })
       .on("mousemove", function (event, d) {
+        if (d.hoverable === false) {
+          return;
+        }
         if (!d.tooltip) {
           return;
         }
@@ -325,7 +340,21 @@ const NetworkModule = function (svg_width, svg_height) {
           .style("top", event.pageY + "px");
       })
       .on("mouseout", function (event, d) {
-        clearEdgeHover();
+        if (d.hoverable === false) {
+          return;
+        }
+        const nextTarget = event.relatedTarget;
+        const movingToEdge = nextTarget
+          && nextTarget.tagName
+          && nextTarget.tagName.toLowerCase() === "line"
+          && (() => {
+            const nextData = d3.select(nextTarget).datum();
+            return !!nextData && nextData.hoverable !== false;
+          })();
+
+        if (!movingToEdge) {
+          clearEdgeHover();
+        }
       });
 
     links.selectAll("line").data(graph.edges).exit().remove();

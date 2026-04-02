@@ -1,8 +1,10 @@
-import redis
-import json
+import argparse
 import datetime
+import json
 
-def start_monitoring():
+import redis
+
+def start_monitoring(show_traffic_lights=True):
     r = redis.Redis(host='localhost', port=6379, decode_responses=True)
     pubsub = r.pubsub()
     pubsub.subscribe('traffic_channel')
@@ -48,6 +50,8 @@ def start_monitoring():
                     pass
 
                 elif evt == "PHASE_CHANGE":
+                    if not show_traffic_lights:
+                        continue
                     # --- FIX QUI: Usiamo .get() per sicurezza e cerchiamo 'allowed_from' ---
                     phase = data.get('new_phase', '?')
                     # Prende 'allowed_from', se non c'è prova 'allowed', se no mette '?'
@@ -60,4 +64,12 @@ def start_monitoring():
                 print(f"Error decoding msg: {e} | Payload: {payload}")
 
 if __name__ == "__main__":
-    start_monitoring()
+    parser = argparse.ArgumentParser(description="ACTS traffic monitor")
+    parser.add_argument(
+        "--hide-traffic-lights",
+        action="store_true",
+        help="Hide traffic light phase changes in the monitor",
+    )
+    args = parser.parse_args()
+
+    start_monitoring(show_traffic_lights=not args.hide_traffic_lights)

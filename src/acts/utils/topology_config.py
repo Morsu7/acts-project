@@ -7,7 +7,7 @@ from math import ceil, sqrt
 @dataclass(frozen=True)
 class TopologyConfig:
     num_nodes: int = 10
-    road_probability: float = 0.75
+    road_probability: float = 0.90
     diagonal_road_probability: float = 0.45
     bidirectional_probability: float = 0.45
     extra_turn_probability: float = 0.45

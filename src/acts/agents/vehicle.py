@@ -5,13 +5,13 @@ from typing import Optional
 import networkx as nx
 
 from mesa import Agent
-from acts.agents.vehicle_logic.event_bus_publisher import EventBusPublisher
-from acts.agents.vehicle_logic.planning_utils import (
+from acts.utils.event_bus_publisher import EventBusPublisher
+from acts.utils.utils_agents import (
     find_constrained_path,
     heuristic_euclidean,
     select_destination,
 )
-from acts.agents.vehicle_logic.vehicle_state import VehicleRuntimeState
+from acts.agents.state.vehicle_state import VehicleRuntimeState
 
 from acts.utils.redis_utils import (
     create_redis_client,

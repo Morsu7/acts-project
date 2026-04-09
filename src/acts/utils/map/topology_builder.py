@@ -7,7 +7,7 @@ from typing import Optional
 
 import networkx as nx
 
-from acts.utils.topology_config import TopologyConfig
+from acts.utils.map.topology_config import TopologyConfig
 
 
 @dataclass(frozen=True)

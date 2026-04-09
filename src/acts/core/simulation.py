@@ -1,7 +1,7 @@
 from mesa import Model
 from mesa.space import NetworkGrid
 from mesa.time import RandomActivation
-from acts.utils.map_generator import generate_topology
+from acts.utils.map.generator import generate_topology
 from acts.agents.vehicle import VehicleAgent
 from acts.agents.infrastructure import TrafficLightAgent
 

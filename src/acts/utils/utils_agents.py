@@ -6,7 +6,20 @@ from typing import Callable, Optional
 import networkx as nx
 
 
+# PlannerState indices:
+#   [0] current_node: nodo corrente nel grafo
+#   [1] active_intersection: intersezione logica in cui ci si trova (None all'inizio)
+#   [2] entry_from_intersection: intersezione da cui si e' entrati in active_intersection
+#   [3] internal_steps: passi consecutivi fatti all'interno della stessa intersezione
+#   [4] last_intersection: ultima intersezione appena lasciata (usata per evitare ritorni immediati)
 PlannerState = tuple[int, Optional[int], Optional[int], int, Optional[int]]
+
+# TransitionDecision indices:
+#   [0] allowed: True se la transizione e' consentita
+#   [1] next_active_intersection: nuovo active_intersection dopo la transizione
+#   [2] next_entry_from_intersection: nuovo entry_from_intersection dopo la transizione
+#   [3] next_internal_steps: nuovo contatore di passi interni
+#   [4] next_last_intersection: nuovo valore di last_intersection
 TransitionDecision = tuple[bool, Optional[int], Optional[int], int, Optional[int]]
 
 NO_INTERNAL_STEPS = 0
@@ -63,7 +76,7 @@ def _is_transition_allowed(
     if entry_from_intersection is not None and next_intersection == entry_from_intersection:
         return False, active_intersection, entry_from_intersection, internal_steps, last_intersection
 
-    if not _is_pass_through_intersection(graph, active_intersection) and internal_steps != one_internal_step:
+    if not _is_pass_through_intersection(graph, active_intersection) and internal_steps > one_internal_step:
         return False, active_intersection, entry_from_intersection, internal_steps, last_intersection
 
     next_last_intersection = last_intersection

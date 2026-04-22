@@ -102,6 +102,7 @@ class VehicleAgent(Agent):
         if not self.runtime.path:
             if self.runtime.destination is None:
                 self.runtime.destination = select_destination(self.model.G, self.random, current_node)
+                print(f"Vehicle {self.unique_id} selected new destination: {self.runtime.destination}")
             if self.runtime.destination is None:
                 return
             self._plan_from(current_node)

@@ -19,8 +19,8 @@ class _IntersectionInfo:
 
 class TopologyBuilder:
     def __init__(self, config: TopologyConfig, seed: Optional[int] = None):
-        self.config = config.normalized()
-        self.rng = random.Random(seed)
+        self.config = config
+        self.random_generator = random.Random(seed)
 
     def build(self) -> nx.DiGraph:
         base_pos = self._build_base_positions()
@@ -71,14 +71,14 @@ class TopologyBuilder:
             if (
                 intersection.col < cols - 1
                 and right < self.config.num_nodes
-                and self.rng.random() < self.config.road_probability
+                and self.random_generator.random() < self.config.road_probability
             ):
                 edges.append((node_id, right))
 
             if (
                 intersection.row < rows - 1
                 and down < self.config.num_nodes
-                and self.rng.random() < self.config.road_probability
+                and self.random_generator.random() < self.config.road_probability
             ):
                 edges.append((node_id, down))
 
@@ -86,7 +86,7 @@ class TopologyBuilder:
                 intersection.row < rows - 1
                 and intersection.col < cols - 1
                 and down_right < self.config.num_nodes
-                and self.rng.random() < self.config.diagonal_road_probability
+                and self.random_generator.random() < self.config.diagonal_road_probability
             ):
                 edges.append((node_id, down_right))
 
@@ -94,7 +94,7 @@ class TopologyBuilder:
                 intersection.row < rows - 1
                 and intersection.col > 0
                 and down_left < self.config.num_nodes
-                and self.rng.random() < self.config.diagonal_road_probability
+                and self.random_generator.random() < self.config.diagonal_road_probability
             ):
                 edges.append((node_id, down_left))
 
@@ -236,14 +236,14 @@ class TopologyBuilder:
                 available_targets = [target_port for target_port in exit_ports if target_port != source_port]
                 if not available_targets:
                     continue
-                target_port = self.rng.choice(available_targets)
+                target_port = self.random_generator.choice(available_targets)
                 self._add_directed(graph, source_port, target_port, edge_kind="turn")
 
             for source_port in entry_ports:
                 for target_port in exit_ports:
                     if source_port == target_port or graph.has_edge(source_port, target_port):
                         continue
-                    if self.rng.random() < self.config.extra_turn_probability:
+                    if self.random_generator.random() < self.config.extra_turn_probability:
                         self._add_directed(graph, source_port, target_port, edge_kind="turn")
 
     def _has_incoming_road_from_other_intersection(
@@ -381,10 +381,10 @@ class TopologyBuilder:
             return [targets[:]]
 
         shuffled = targets[:]
-        self.rng.shuffle(shuffled)
+        self.random_generator.shuffle(shuffled)
 
         max_groups = len(shuffled)
-        num_groups = self.rng.randint(1, max_groups)
+        num_groups = self.random_generator.randint(1, max_groups)
 
         partitions: list[list[int]] = [[] for _ in range(num_groups)]
         for index, target in enumerate(shuffled):
@@ -396,12 +396,12 @@ class TopologyBuilder:
         return partitions
 
     def _add_random_connection(self, graph: nx.DiGraph, u: int, v: int, edge_kind: str) -> None:
-        if self.rng.random() < self.config.bidirectional_probability:
+        if self.random_generator.random() < self.config.bidirectional_probability:
             self._add_directed(graph, u, v, edge_kind=edge_kind)
             self._add_directed(graph, v, u, edge_kind=edge_kind)
             return
 
-        if self.rng.random() < 0.5:
+        if self.random_generator.random() < 0.5:
             self._add_directed(graph, u, v, edge_kind=edge_kind)
         else:
             self._add_directed(graph, v, u, edge_kind=edge_kind)

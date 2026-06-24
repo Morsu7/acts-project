@@ -1,4 +1,11 @@
+from __future__ import annotations
+
+from typing import Any
+
 from mesa import Agent
+
+from acts.agents.vehicle import VehicleAgent
+from acts.agents.traffic_light_state import TrafficLightRuntimeState
 
 from acts.utils.redis_utils import (
     create_redis_client,
@@ -8,13 +15,21 @@ from acts.utils.redis_utils import (
 
 class TrafficLightAgent(Agent):
     EVENT_CHANNEL = "traffic_channel"
+    STATE_GREEN = "GREEN"
+    STATE_RED = "RED"
 
-    def __init__(self, unique_id, model, intersection_id, controlled_nodes, intersection_meta=None):
+    def __init__(
+        self,
+        unique_id,
+        model,
+        intersection_id,
+        controlled_nodes,
+        intersection_meta: dict[str, Any] | None = None,
+    ):
         super().__init__(unique_id, model)
         self.intersection_id = intersection_id
         self.controlled_nodes = list(controlled_nodes)
-        self.state = "GREEN"
-        self.lamport_clock = 0
+        self.runtime = TrafficLightRuntimeState(status=self.STATE_GREEN)
 
         self.intersection_meta = intersection_meta or {}
         self.min_green_duration = max(1, int(self.intersection_meta.get("min_green_duration", 5)))
@@ -39,11 +54,51 @@ class TrafficLightAgent(Agent):
         for target_node in self.controlled_nodes:
             self.model.G.nodes[target_node]["intersection_owner"] = self.intersection_id
 
-        self.redis = create_redis_client()
-        if self.redis:
-            self.redis.delete(f"sensor_{self.intersection_id}")
-            self.redis.delete(f"tl_{self.intersection_id}_allowed")
+        self.redis_client = create_redis_client()
+        if self.redis_client:
+            self.redis_client.delete(f"sensor_{self.intersection_id}")
+            self.redis_client.delete(f"tl_{self.intersection_id}_allowed")
         self.update_redis()
+
+    @property
+    def state(self) -> str:
+        return self.runtime.status
+
+    @state.setter
+    def state(self, value: str) -> None:
+        self.runtime.status = value
+
+    @property
+    def lamport_clock(self) -> int:
+        return self.runtime.lamport_clock
+
+    @lamport_clock.setter
+    def lamport_clock(self, value: int) -> None:
+        self.runtime.lamport_clock = value
+
+    @property
+    def active_green_group(self) -> str | None:
+        return self.runtime.active_green_group
+
+    @active_green_group.setter
+    def active_green_group(self, value: str | None) -> None:
+        self.runtime.active_green_group = value
+
+    @property
+    def green_elapsed(self) -> int:
+        return self.runtime.green_elapsed
+
+    @green_elapsed.setter
+    def green_elapsed(self, value: int) -> None:
+        self.runtime.green_elapsed = value
+
+    @property
+    def waiting_seconds_by_edge(self) -> dict[tuple[int, int], int]:
+        return self.runtime.waiting_seconds_by_edge
+
+    @waiting_seconds_by_edge.setter
+    def waiting_seconds_by_edge(self, value: dict[tuple[int, int], int]) -> None:
+        self.runtime.waiting_seconds_by_edge = value
 
     def step(self):
         self.lamport_clock += 1
@@ -116,29 +171,14 @@ class TrafficLightAgent(Agent):
         return groups
 
     def _build_priority_groups(self):
-        ordered = []
-        configured_nodes = self.intersection_meta.get("priority_nodes", [])
-
-        for node_id in configured_nodes:
-            try:
-                candidate = int(node_id)
-            except (TypeError, ValueError):
-                continue
-            if candidate in self.edge_groups and candidate not in ordered:
-                ordered.append(candidate)
-
-        for group_id in sorted(self.edge_groups.keys()):
-            if group_id not in ordered:
-                ordered.append(group_id)
-
-        return ordered
+        return list(self.edge_groups.keys())
 
     def _collect_waiting_counts(self):
         counts_by_edge = {edge: 0 for edge in self.controlled_edges}
         controlled_set = set(self.controlled_edges)
 
         for agent in self.model.schedule.agents:
-            if agent.__class__.__name__ != "VehicleAgent":
+            if not isinstance(agent, VehicleAgent):
                 continue
 
             if getattr(agent, "state", None) != "QUEUED":
@@ -296,7 +336,7 @@ class TrafficLightAgent(Agent):
             "controlled_edges": [self._serialize_edge(edge) for edge in self.controlled_edges],
             "controlled_nodes": self.controlled_nodes,
         }
-        set_json(self.redis, f"tl_{self.intersection_id}_state", state_payload)
+        set_json(self.redis_client, f"tl_{self.intersection_id}_state", state_payload)
 
         msg = {
             "agent_id": f"TL_{self.intersection_id}",
@@ -307,4 +347,4 @@ class TrafficLightAgent(Agent):
                 "green_group": active_green_group,
             },
         }
-        publish_json(self.redis, self.EVENT_CHANNEL, msg)
+        publish_json(self.redis_client, self.EVENT_CHANNEL, msg)

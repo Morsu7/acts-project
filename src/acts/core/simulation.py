@@ -1,7 +1,7 @@
 from mesa import Model
 from mesa.space import NetworkGrid
 from mesa.time import RandomActivation
-from acts.utils.map_generator import generate_topology
+from acts.utils.map.generator import generate_topology
 from acts.agents.vehicle import VehicleAgent
 from acts.agents.infrastructure import TrafficLightAgent
 
@@ -12,12 +12,17 @@ class CityModel(Model):
         
         # 1. Grafo
         self.G = generate_topology(num_nodes=16)
+
+        #print per debug
+        #print(f"{self.G.nodes(data=True)}\n")
+        #print(f"{self.G.edges(data=True)}\n")
         
         # 2. Spazio standard Mesa
         self.grid = NetworkGrid(self.G)
         self.schedule = RandomActivation(self)
         self.running = True
-
+        
+        # Costruzione mappa incrocio -> nodi
         nodes = list(self.G.nodes())
         self.intersection_meta = self.G.graph.get("intersections", {})
         self.intersection_nodes = {
@@ -28,6 +33,10 @@ class CityModel(Model):
             for node in nodes:
                 intersection_id = self.G.nodes[node].get("intersection", node)
                 self.intersection_nodes.setdefault(intersection_id, []).append(node)
+
+        #print per debug
+        #print(f"{self.intersection_nodes}\n")
+        #print(f"{self.intersection_meta}\n")
 
         # 3. Agenti
         for intersection_id, controlled_nodes in self.intersection_nodes.items():

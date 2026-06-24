@@ -15,7 +15,6 @@ from acts.agents.state.vehicle_state import VehicleRuntimeState
 
 from acts.utils.redis_utils import (
     create_redis_client,
-    release_lock_if_owner,
 )
 
 
@@ -130,7 +129,7 @@ class VehicleAgent(Agent):
 
         # Rilascia il lock del nodo corrente prima di partire.
         key = f"lock_node_{current_node}"
-        release_lock_if_owner(self.redis_client, key=key, owner_id=self.unique_id)
+        #release_lock_if_owner(self.redis_client, key=key, owner_id=self.unique_id)
         self.runtime.status = self.STATE_DRIVING
 
         self.publisher.publish(

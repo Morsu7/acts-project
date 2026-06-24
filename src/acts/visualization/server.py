@@ -4,10 +4,7 @@ from acts.core.simulation import CityModel
 from acts.agents.vehicle import VehicleAgent
 from acts.visualization.network_module_custom import CustomNetworkModule
 
-
-def _is_vehicle_agent(agent):
-    return isinstance(agent, VehicleAgent) or agent.__class__.__name__ == "VehicleAgent"
-
+from acts.utils.utils_agents import _is_vehicle_agent
 
 def _compute_vehicle_marker(car, current_node, G):
     base = {

@@ -332,13 +332,6 @@ class TopologyBuilder:
             priority_edge_groups = self._build_random_edge_groups(graph, sorted_nodes)
             intersections_meta[intersection_id] = {
                 "nodes": sorted_nodes,
-                "priority_nodes": sorted_nodes,
-                "priority_edge_groups": priority_edge_groups,
-                "min_green_duration": 5,
-                "priority_weights": {
-                    "waiting_cars": 1.0,
-                    "waiting_seconds": 1.0,
-                },
                 "is_pass_through": len(neighbors_map[intersection_id]) <= 2,
                 "neighbor_intersections": sorted(neighbors_map[intersection_id]),
                 "position": base_pos[intersection_id],

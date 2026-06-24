@@ -5,7 +5,6 @@ from typing import Callable, Optional
 
 import networkx as nx
 
-
 # PlannerState indices:
 #   [0] current_node: nodo corrente nel grafo
 #   [1] active_intersection: intersezione logica in cui ci si trova (None all'inizio)
@@ -181,3 +180,7 @@ def find_constrained_path(
             heapq.heappush(open_heap, (estimated_total, tentative_cost, next_state))
 
     raise nx.NetworkXNoPath
+
+def _is_vehicle_agent(agent):
+    from acts.agents.vehicle import VehicleAgent
+    return isinstance(agent, VehicleAgent) or agent.__class__.__name__ == "VehicleAgent"

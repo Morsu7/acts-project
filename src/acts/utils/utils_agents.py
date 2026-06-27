@@ -27,6 +27,83 @@ MAX_INTERNAL_STEPS = 1
 START_COST = 0.0
 DEFAULT_EDGE_WEIGHT = 1.0
 
+import heapq
+import networkx as nx
+import math
+
+def heuristic_euclidean(G: nx.DiGraph, current: int, goal: int) -> float:
+    """Calcola la distanza euclidea tra due nodi nel grafo espanso."""
+    pos_curr = G.nodes[current].get("pos", (0.0, 0.0))
+    pos_goal = G.nodes[goal].get("pos", (0.0, 0.0))
+    return math.hypot(pos_curr[0] - pos_goal[0], pos_curr[1] - pos_goal[1])
+
+def find_constrained_path(G: nx.DiGraph, heuristic_fn, start: int, goal: int) -> list[int]:
+    """
+    Trova il percorso più breve usando A* con vincolo di non-consecutività 
+    dei passi interni all'incrocio.
+    """
+    if start not in G or goal not in G:
+        raise nx.NodeNotFound("Nodo di partenza o destinazione non trovato.")
+    
+    if start == goal:
+        return [start]
+
+    # Coda di priorità: (f_score, g_score, current_node, last_was_internal, path)
+    # Lo stato è definito dalla coppia (node, last_was_internal)
+    # last_was_internal: True se l'ultimo arco percorso era interno allo stesso incrocio
+    queue = [(heuristic_fn(start, goal), 0.0, start, False, [start])]
+    
+    # Dizionario delle distanze minime per stato: (node, last_was_internal) -> g_score
+    # Questo è fondamentale per permettere di ri-visitare lo stesso nodo con uno stato diverso
+    shortest_paths: dict[tuple[int, bool], float] = {(start, False): 0.0}
+
+    while queue:
+        f_score, g_score, current, last_was_internal, path = heapq.heappop(queue)
+
+        if current == goal:
+            return path
+
+        # Ottimizzazione: se abbiamo trovato un percorso migliore per questo stato, ignoriamo
+        if g_score > shortest_paths.get((current, last_was_internal), float('inf')):
+            continue
+
+        curr_int = G.nodes[current].get("intersection")
+
+        for neighbor in G.successors(current):
+            neigh_int = G.nodes[neighbor].get("intersection")
+            
+            # Un arco è interno se entrambi i nodi appartengono allo stesso incrocio
+            # e non sono nodi speciali (Gate)
+            is_internal = (
+                curr_int is not None and 
+                neigh_int is not None and 
+                curr_int == neigh_int and
+                not G.nodes[current].get("is_gate", False) and
+                not G.nodes[neighbor].get("is_gate", False)
+            )
+
+            # --- IL VINCOLO IMPERATIVO ---
+            if last_was_internal and is_internal:
+                continue
+
+            # Calcolo costo
+            weight = G.edges[current, neighbor].get("weight", 1.0)
+            next_g_score = g_score + weight
+            
+            state_key = (neighbor, is_internal)
+
+            # Se lo stato non è stato visitato o abbiamo trovato un cammino più breve
+            if next_g_score < shortest_paths.get(state_key, float('inf')):
+                shortest_paths[state_key] = next_g_score
+                f_score_new = next_g_score + heuristic_fn(neighbor, goal)
+                
+                heapq.heappush(
+                    queue, 
+                    (f_score_new, next_g_score, neighbor, is_internal, path + [neighbor])
+                )
+
+    # Se arriviamo qui, non esiste un percorso che rispetti il vincolo
+    raise nx.NetworkXNoPath(f"Nessun percorso valido tra {start} e {goal} con i vincoli imposti.")
 
 def _node_intersection(graph: nx.DiGraph, node_id: int) -> int:
     return graph.nodes[node_id].get("intersection", node_id)
@@ -107,79 +184,7 @@ def select_destination(graph: nx.DiGraph, random_source, current_node: int) -> O
     return random_source.choice(candidates)
 
 
-def heuristic_euclidean(graph: nx.DiGraph, source_node: int, target_node: int) -> float:
-    source_pos = graph.nodes[source_node].get("pos", (0.0, 0.0))
-    target_pos = graph.nodes[target_node].get("pos", (0.0, 0.0))
-    dx = source_pos[0] - target_pos[0]
-    dy = source_pos[1] - target_pos[1]
-    return (dx * dx + dy * dy) ** 0.5
 
-
-def find_constrained_path(
-    graph: nx.DiGraph,
-    heuristic: Callable[[int, int], float],
-    source: int,
-    target: int,
-) -> list[int]:
-    start_state: PlannerState = (source, None, None, NO_INTERNAL_STEPS, None)
-    open_heap: list[tuple[float, float, PlannerState]] = []
-    heapq.heappush(open_heap, (heuristic(source, target), START_COST, start_state))
-
-    came_from: dict[PlannerState, PlannerState] = {}
-    g_score: dict[PlannerState, float] = {start_state: START_COST}
-
-    while open_heap:
-        _, current_cost, state = heapq.heappop(open_heap)
-        current_node, active_intersection, entry_from_intersection, internal_steps, last_intersection = state
-
-        if current_cost > g_score.get(state, float("inf")):
-            continue
-
-        if current_node == target:
-            return _reconstruct_route(state, came_from)
-
-        for neighbor in graph.successors(current_node):
-            (
-                allowed,
-                next_active,
-                next_entry_from,
-                next_internal_steps,
-                next_last_intersection,
-            ) = _is_transition_allowed(
-                graph=graph,
-                current_node=current_node,
-                next_node=neighbor,
-                active_intersection=active_intersection,
-                entry_from_intersection=entry_from_intersection,
-                internal_steps=internal_steps,
-                last_intersection=last_intersection,
-                no_internal_steps=NO_INTERNAL_STEPS,
-                one_internal_step=ONE_INTERNAL_STEP,
-                max_internal_steps=MAX_INTERNAL_STEPS,
-            )
-            if not allowed:
-                continue
-
-            edge_data = graph.get_edge_data(current_node, neighbor) or {}
-            edge_cost = float(edge_data.get("weight", DEFAULT_EDGE_WEIGHT))
-            tentative_cost = current_cost + edge_cost
-            next_state: PlannerState = (
-                neighbor,
-                next_active,
-                next_entry_from,
-                next_internal_steps,
-                next_last_intersection,
-            )
-
-            if tentative_cost >= g_score.get(next_state, float("inf")):
-                continue
-
-            came_from[next_state] = state
-            g_score[next_state] = tentative_cost
-            estimated_total = tentative_cost + heuristic(neighbor, target)
-            heapq.heappush(open_heap, (estimated_total, tentative_cost, next_state))
-
-    raise nx.NetworkXNoPath
 
 def _is_vehicle_agent(agent):
     from acts.agents.vehicle import VehicleAgent

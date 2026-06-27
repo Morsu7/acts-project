@@ -4,8 +4,6 @@ from typing import Optional
 
 import networkx as nx
 
-from mesa import Agent
-from acts.utils.event_bus_publisher import EventBusPublisher
 from acts.utils.utils_agents import (
     find_constrained_path,
     heuristic_euclidean,
@@ -13,13 +11,9 @@ from acts.utils.utils_agents import (
 )
 from acts.agents.state.vehicle_state import VehicleRuntimeState
 
-from acts.utils.redis_utils import (
-    create_redis_client,
-)
+from acts.agents.publishing_agent import PublishingAgent
 
-
-class VehicleAgent(Agent):
-    EVENT_CHANNEL = "traffic_channel"
+class VehicleAgent(PublishingAgent):
     LOCK_TTL_SECONDS = 5
     TRAVEL_TIME_SCALE = 20
     MIN_TRAVEL_TICKS = 5
@@ -27,10 +21,8 @@ class VehicleAgent(Agent):
     STATE_DRIVING = "DRIVING"
 
     def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
+        super().__init__(unique_id, model, "traffic_channel")
         self.runtime = VehicleRuntimeState(status=self.STATE_QUEUED)
-        self.redis_client = create_redis_client()
-        self.publisher = EventBusPublisher(self.redis_client, self.EVENT_CHANNEL, self.unique_id)
 
     # Public API: used outside VehicleAgent (visualization, model).
     @property
@@ -69,10 +61,9 @@ class VehicleAgent(Agent):
                 self.runtime.edge_total_timer = 0
                 self.runtime.sensor_registered = False
                 self.runtime.sensor_target_intersection = None
-                self.publisher.publish("ARRIVED_NODE", {"node": self.pos}, self.runtime.lamport_clock)
+                self.publish_event("ARRIVED_NODE", {"node": self.pos}, self.runtime.lamport_clock)
 
     def _plan_from(self, node_id: int) -> None:
-        # Calcola il percorso vincolato e pubblica l'evento di pianificazione.
         try:
             path = find_constrained_path(
                 self.model.G,
@@ -80,16 +71,11 @@ class VehicleAgent(Agent):
                 node_id,
                 self.runtime.destination,
             )
-            self.publisher.publish(
-                "PLANNING_ASTAR",
-                {
-                    "dest": self.runtime.destination,
-                    "steps": len(path),
-                },
-                self.runtime.lamport_clock,
-            )
             self.runtime.path = path
         except (nx.NetworkXNoPath, nx.NodeNotFound):
+            # Se fallisce, significa che la destinazione è irraggiungibile 
+            # con il vincolo. Riprova a scegliere una destinazione diversa.
+            self.runtime.destination = None 
             self.runtime.path = []
 
     def _queue_step(self, current_node: int) -> None:
@@ -101,7 +87,7 @@ class VehicleAgent(Agent):
         if not self.runtime.path:
             if self.runtime.destination is None:
                 self.runtime.destination = select_destination(self.model.G, self.random, current_node)
-                print(f"Vehicle {self.unique_id} selected new destination: {self.runtime.destination}")
+                #print(f"Vehicle {self.unique_id} selected new destination: {self.runtime.destination}")
             if self.runtime.destination is None:
                 return
             self._plan_from(current_node)
@@ -132,7 +118,7 @@ class VehicleAgent(Agent):
         #release_lock_if_owner(self.redis_client, key=key, owner_id=self.unique_id)
         self.runtime.status = self.STATE_DRIVING
 
-        self.publisher.publish(
+        self.publish_event(
             "DEPARTING",
             {
                 "from": current_node,

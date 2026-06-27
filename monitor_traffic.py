@@ -9,7 +9,7 @@ def start_monitoring(show_traffic_lights=True):
     pubsub = r.pubsub()
     pubsub.subscribe('traffic_channel')
     
-    print("📡 ACTS TRAFFIC CONTROL CENTER")
+    print("ACTS TRAFFIC CONTROL CENTER")
     print("-" * 105)
     print(f"{'TIME':<10} | {'CLOCK':<6} | {'AGENT':<10} | EVENTO")
     print("-" * 105)

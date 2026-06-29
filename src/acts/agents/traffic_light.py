@@ -74,26 +74,35 @@ class TrafficLightAgent(PublishingAgent):
         self.lamport_clock += 1
         self.publish_event(event_type, data, self.lamport_clock)
 
-    # TODO: calculate different score for each direction
     def _detect_queue_size(self):
-        # Prende tutti gli agenti nella cella dell'incrocio
         agents = self.model.grid.get_cell_list_contents([self.node_id])
+        queued_vehicles = [a for a in agents if _is_vehicle_agent(a) and a.state == "QUEUED"]
 
-        # Filtra tenendo solo i veicoli realmente in coda ("QUEUED")
-        queued_vehicles_count = sum(
-            1 for a in agents 
-            if _is_vehicle_agent(a) and a.state == "QUEUED"
-        )
-
-        # Assegna il totale indistintamente a tutte le direzioni dell'incrocio
         for direction in self.directions:
             direction_state = direction.state.runtime
-            direction_state.queue_length = queued_vehicles_count
+            
+            # Estraiamo solo il nodo di arrivo (l'indice 1) da ogni arco della direzione
+            target_nodes = [edge[1] for edge in direction.edges]
+            
+            count = 0
+            for v in queued_vehicles:
+                v_edge = v.current_or_target_node
+                if v_edge is not None:
+                    # Prendiamo il nodo di arrivo (l'indice 1) dell'arco del veicolo
+                    v_arrival_node = v_edge[1]
+                    match = v_arrival_node in target_nodes
+                else:
+                    match = False
+                    v_arrival_node = None
+                if match:
+                    count += 1
+                    
+            direction_state.queue_length = count
             
             if direction_state.queue_length > 0:
                 direction_state.waiting_time += 1
             else:
-                direction_state.waiting_time = 0  # Reset se non ci sono auto
+                direction_state.waiting_time = 0
 
     def _has_waiting_vehicles(self, direction: ControlledDirection) -> bool:
         return direction.state.runtime.queue_length > 0

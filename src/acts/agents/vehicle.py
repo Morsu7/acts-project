@@ -45,6 +45,25 @@ class VehicleAgent(PublishingAgent):
     def edge_total_timer(self) -> int:
         return self.runtime.edge_total_timer
 
+    @property
+    def current_or_target_node(self) -> Optional[tuple[int, int]]:
+        """
+        Restituisce l'id dell'arco (u, v) che la macchina sta attraversando 
+        o che ha intenzione di attraversare al prossimo passo. 
+        Restituisce None se non ci sono archi disponibili o pianificati.
+        """
+        # Se il veicolo sta guidando, l'arco è definito tra la posizione attuale 
+        # (che Mesa aggiorna solo all'arrivo) e il nodo memorizzato nel buffer.
+        if self.state == self.STATE_DRIVING and self.runtime.next_node_buffer is not None:
+            return (self.pos, self.runtime.next_node_buffer)
+        
+        # Se il veicolo è in coda (QUEUED) e ha un percorso pianificato valido,
+        # l'arco target è quello tra il nodo attuale e il prossimo nel path.
+        if self.state == self.STATE_QUEUED and len(self.runtime.path) > 1:
+            return (self.pos, self.runtime.path[1])
+            
+        return None
+
     # Public API: called by Mesa scheduler.
     def step(self):
         # Aggiornamento del veicolo per un singolo tick.

@@ -279,12 +279,47 @@ class TopologyBuilder:
             intersection_nodes = [n for n, attrs in graph.nodes(data=True) if attrs.get("intersection") == intersection_id]
             sorted_nodes = sorted(intersection_nodes)
             
+            # --- NEW: FIND NEIGHBORING TRAFFIC LIGHTS / EXTERNAL PORTS ---
+            neighbor_traffic_lights = set()
+            external_connections = []  # List of dicts for exact port-to-port links
+
+            for local_port in sorted_nodes:
+                # Look at external roads coming INTO this intersection
+                for src, _ in graph.in_edges(local_port):
+                    src_meta = graph.nodes[src]
+                    src_intersection = src_meta.get("intersection")
+                    if src_intersection is not None and src_intersection != intersection_id:
+                        neighbor_traffic_lights.add(src_intersection)
+                        external_connections.append({
+                            "direction": "incoming",
+                            "neighbor_intersection": src_intersection,
+                            "neighbor_port": src,
+                            "local_port": local_port
+                        })
+
+                # Look at external roads going OUT of this intersection
+                for _, dst in graph.out_edges(local_port):
+                    dst_meta = graph.nodes[dst]
+                    dst_intersection = dst_meta.get("intersection")
+                    if dst_intersection is not None and dst_intersection != intersection_id:
+                        neighbor_traffic_lights.add(dst_intersection)
+                        external_connections.append({
+                            "direction": "outgoing",
+                            "neighbor_intersection": dst_intersection,
+                            "neighbor_port": dst,
+                            "local_port": local_port
+                        })
+            # -------------------------------------------------------------
+
             intersections_meta[intersection_id] = {
                 "nodes": sorted_nodes,
                 "is_pass_through": len(neighbors_map[intersection_id]) <= 2,
                 "neighbor_intersections": sorted(neighbors_map[intersection_id]),
                 "position": base_pos[intersection_id],
                 "priority_edge_groups": self._build_random_edge_groups(graph, sorted_nodes),
+                # Storing the new topology fields here
+                "neighbor_traffic_lights": sorted(list(neighbor_traffic_lights)),
+                "external_connections": external_connections
             }
 
         graph.graph["base_intersection_count"] = self.config.num_nodes

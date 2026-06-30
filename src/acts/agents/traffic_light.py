@@ -34,11 +34,13 @@ class TrafficLightAgent(PublishingAgent):
     YELLOW_TIME = 2
     TIME_BETWEEN_REQUESTS = 3 # In mesa ticks
 
-    def __init__(self, unique_id, model, intersection_id, node_id, controlled_directions, neighbors=None):
+    def __init__(self, unique_id, model, intersection_id, node_id, controlled_directions, inter_neighbors=None, external_neighbors=None):
         super().__init__(unique_id, model, f"channel_{intersection_id}")
         self.intersection_id = intersection_id
         self.node_id = node_id
-        self.num_neighbors = neighbors
+        self.num_neighbors = inter_neighbors
+        self.external_neighbors = external_neighbors
+        self.ingoing_edges = None  # Wil l be lazily evaluated after every agent is placed
         self.lamport_clock = 0
 
         # Turn the groups of edges in ControlledDirection objects
@@ -56,7 +58,6 @@ class TrafficLightAgent(PublishingAgent):
     # Public API: called by Mesa scheduler.
     def step(self):
         self._detect_queue_size()       # detect presence of waiting cars and update waiting time
-                                        # TODO: detect arriving cars before they queue up
         self._receive_messages()        # receive messages from other tl
         self._decide_state()        
 
@@ -74,31 +75,86 @@ class TrafficLightAgent(PublishingAgent):
         self.lamport_clock += 1
         self.publish_event(event_type, data, self.lamport_clock)
 
+    def _get_ingoing_edges(self):   # lazy evaluation of ingoing edges, makes sure that each agent is already placed on the grid before trying to find them
+        if self.ingoing_edges is None:
+            self.ingoing_edges = self._build_ingoing_edges(self.external_neighbors)
+
+        return self.ingoing_edges
+
+    def _build_ingoing_edges(self, agents_ids):
+        # Edges that come from neighboring intersections and lead to this traffic light
+        ingoing_edges = self.model.G.in_edges(self.node_id, data=False)
+        
+        neighbor_node_ids = set()
+        for source, _ in ingoing_edges:
+            cell_agents = self.model.grid.get_cell_list_contents([source])
+            for agent in cell_agents:
+                if getattr(agent, "unique_id", None) in getattr(self, "external_neighbors", []):
+                    neighbor_node_ids.add(source)
+                    break # Found the matching external neighbor agent on this node
+
+        ingoing_lanes = [
+            (source, target) for source, target in ingoing_edges
+            if source in neighbor_node_ids
+        ]
+
+        return ingoing_lanes
+
+    # This method gets information directly from the model's graph and not from the distributed system
+    # this is a wanted behavior, because this function simulates a physical sensor placed on the traffic light
+    # that detects the cars in front of the lanes. 
     def _detect_queue_size(self):
-        agents = self.model.grid.get_cell_list_contents([self.node_id])
-        queued_vehicles = [a for a in agents if _is_vehicle_agent(a) and a.state == "QUEUED"]
+        # 1. Get vehicles that are already QUEUED at the stop line (on the node)
+        node_agents = self.model.grid.get_cell_list_contents([self.node_id])
+        queued_vehicles = [a for a in node_agents if _is_vehicle_agent(a) and a.state == "QUEUED"]
+
+        # Define how close a driving car must be (in simulation ticks) to be counted
+        NEAR_TRAFFIC_LIGHT_THRESHOLD = 5 
 
         for direction in self.directions:
             direction_state = direction.state.runtime
-            
-            # Estraiamo solo il nodo di arrivo (l'indice 1) da ogni arco della direzione
-            target_nodes = [edge[1] for edge in direction.edges]
+            #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} with edges {direction.edges}\n")
+            # Edges that go inside the intersection
+            outgoing_lanes = set(int(edge[1]) for edge in direction.edges)
+            ingoing_lanes = self._get_ingoing_edges()
+            #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sees the following outgoing lanes: {outgoing_lanes}\n")
+            #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sees the following ingoing lanes: {ingoing_lanes}\n")
             
             count = 0
+
+            # --- CASE 1: COUNT QUEUED VEHICLES ---
+            # They are at the light. Check where they want to exit right now (path[1]).
             for v in queued_vehicles:
-                v_edge = v.current_or_target_node
-                if v_edge is not None:
-                    # Prendiamo il nodo di arrivo (l'indice 1) dell'arco del veicolo
-                    v_arrival_node = v_edge[1]
-                    match = v_arrival_node in target_nodes
-                else:
-                    match = False
-                    v_arrival_node = None
-                if match:
-                    count += 1
+                if v.path and len(v.path) > 1:
+                    next_node_intent = v.path[1]
+                    # Check if this exit trajectory belongs to the current direction handler
+                    if next_node_intent in outgoing_lanes:
+                        count += 1
+
+            # --- CASE 2: COUNT CLOSE DRIVING VEHICLES (ANTICIPATION) ---
+            # They are approaching. Check in which lane they are (path[2]).
+            for source, target in ingoing_lanes:
+
+                edge_data = self.model.G.get_edge_data(source, target) or {}
+                driving_vehicles_on_edge = edge_data.get("vehicles", [])
+
+                for v in driving_vehicles_on_edge:
+                    if v.state == "DRIVING" and v.travel_timer <= NEAR_TRAFFIC_LIGHT_THRESHOLD:
+                        if v.path and len(v.path) > 2:
+                            print(f"car path: {v.path}\n")
+                            # path[1] is this light. path[2] is their downstream turn.
+                            downstream_node_intent = v.path[2]
+                            
+                            # Check if that future turn aligns with this direction grouping
+                            if downstream_node_intent in outgoing_lanes:
+                                count += 1
+                        else:
+                            # Fallback if the traffic light itself is their absolute destination
+                            count += 1
                     
             direction_state.queue_length = count
             
+            # Update waiting time tracking
             if direction_state.queue_length > 0:
                 direction_state.waiting_time += 1
             else:

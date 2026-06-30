@@ -15,7 +15,7 @@ from acts.agents.publishing_agent import PublishingAgent
 
 class VehicleAgent(PublishingAgent):
     LOCK_TTL_SECONDS = 5
-    TRAVEL_TIME_SCALE = 20
+    TRAVEL_TIME_SCALE = 60
     MIN_TRAVEL_TICKS = 5
     STATE_QUEUED = "QUEUED"
     STATE_DRIVING = "DRIVING"
@@ -46,6 +46,18 @@ class VehicleAgent(PublishingAgent):
         return self.runtime.edge_total_timer
 
     @property
+    def edge_completion_ratio(self) -> float:
+        """Returns the vehicle's position along the current edge as a ratio from 0.0 to 1.0."""
+        if self.state != self.STATE_DRIVING or self.edge_total_timer <= 0:
+            return 0.0
+        
+        # Ticks spent driving on this edge
+        ticks_driven = self.edge_total_timer - self.travel_timer
+        
+        # Return progression ratio clamped between 0 and 1
+        return min(1.0, max(0.0, ticks_driven / self.edge_total_timer))
+
+    @property
     def current_or_target_node(self) -> Optional[tuple[int, int]]:
         """
         Restituisce l'id dell'arco (u, v) che la macchina sta attraversando 
@@ -73,8 +85,18 @@ class VehicleAgent(PublishingAgent):
         elif self.state == self.STATE_DRIVING:
             self.runtime.travel_timer -= 1
             if self.runtime.travel_timer <= 0:
-                # Arrivo: sposta il veicolo e resetta lo stato di viaggio.
-                self.model.grid.move_agent(self, self.runtime.next_node_buffer)
+                # --- FIX: Safe Edge-to-Node Arrival Transition ---
+                # 1. Unregister this vehicle from the current NetworkX edge list
+                from_node, to_node = self.pos
+                if "vehicles" in self.model.G[from_node][to_node]:
+                    if self in self.model.G[from_node][to_node]["vehicles"]:
+                        self.model.G[from_node][to_node]["vehicles"].remove(self)
+                
+                # 2. Safely land the agent onto its physical node back inside Mesa
+                next_node = self.runtime.next_node_buffer
+                self.model.grid.place_agent(self, next_node)
+                # --------------------------------------------------
+
                 self.runtime.path.pop(0)
                 self.runtime.status = self.STATE_QUEUED
                 self.runtime.edge_total_timer = 0
@@ -126,16 +148,41 @@ class VehicleAgent(PublishingAgent):
         if edge_state is not None and str(edge_state).upper() != "GREEN":
             return
 
+        # --- TIMER DIAGNOSTIC PRINTING ---
         dist = edge_data.get("weight", 0.5)
-        timer = int(dist * self.TRAVEL_TIME_SCALE)
-        self.runtime.travel_timer = max(timer, self.MIN_TRAVEL_TICKS)
+        expected_timer = int(dist * self.TRAVEL_TIME_SCALE)
+        effective_timer = max(expected_timer, self.MIN_TRAVEL_TICKS)
+        
+        print(
+            f"[Car {self.unique_id}] Edge: {current_node} -> {next_node} | "
+            f"Weight: {dist:.2f} | "
+            f"Expected Ticks: {expected_timer} | "
+            f"Effective Ticks (Applied): {effective_timer}"
+            f"{' (Capped by MIN_TRAVEL_TICKS)' if expected_timer < self.MIN_TRAVEL_TICKS else ''}"
+        )
+        
+        self.runtime.travel_timer = effective_timer
         self.runtime.edge_total_timer = self.runtime.travel_timer
         self.runtime.next_node_buffer = next_node
+        # ---------------------------------
 
         # Rilascia il lock del nodo corrente prima di partire.
         key = f"lock_node_{current_node}"
         #release_lock_if_owner(self.redis_client, key=key, owner_id=self.unique_id)
         self.runtime.status = self.STATE_DRIVING
+
+        # --- FIX: Safe Edge Tracking ---
+        # 1. Remove agent from the old node room in Mesa's space
+        self.model.grid.remove_agent(self)
+        
+        # 2. Track the agent inside the networkx edge data dictionary
+        if "vehicles" not in edge_data:
+            self.model.G[current_node][next_node]["vehicles"] = []
+        self.model.G[current_node][next_node]["vehicles"].append(self)
+        
+        # 3. Keep a logical reference on the agent itself for its position
+        self.pos = (current_node, next_node) 
+        # -------------------------------
 
         self.publish_event(
             "DEPARTING",

@@ -65,6 +65,7 @@ def network_portrayal(G):
     portrayal['edges'] = []
     portrayal['vehicles'] = []
 
+    # --- 1. EDGE LOOP (Renders edges AND driving vehicles) ---
     for source, target in G.edges():
         source_intersection = G.nodes[source].get("intersection", source)
         target_intersection = G.nodes[target].get("intersection", target)
@@ -110,6 +111,14 @@ def network_portrayal(G):
             'hoverable': internal_edge,
         })
 
+        # --- NEW: Catch driving cars floating inside this edge ---
+        driving_cars = edge_data.get("vehicles", [])
+        for car in driving_cars:
+            # When driving, car.pos is a tuple (source, target), but _compute_vehicle_marker 
+            # expects the source node ID to determine the base coordinate system.
+            portrayal['vehicles'].append(_compute_vehicle_marker(car, source, G))
+
+    # --- 2. NODE LOOP (Renders vertices AND queued vehicles) ---
     for node in G.nodes():
         node_data = G.nodes[node]
         agents = node_data.get("agent", [])
@@ -118,7 +127,6 @@ def network_portrayal(G):
         
         cars = [a for a in agents if _is_vehicle_agent(a)]
         
-        # --- LOGICA DI RENDERING NODI SPECIALI (GATE) ---
         if node_data.get("is_gate", False):
             color = "#007BFF"  # Blu brillante per i nodi spawn/sink
             size = 12          # Più grande rispetto ai nodi regolari

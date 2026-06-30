@@ -195,8 +195,31 @@ class TopologyBuilder:
             
             if u_port is not None and v_port is not None:
                 p1, p2 = graph.nodes[u_port]["pos"], graph.nodes[v_port]["pos"]
-                dist = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
-                graph.add_edge(u_port, v_port, weight=dist, edge_kind="road")
+                
+                # 1. Calculate realistic physical distance in meters
+                # Assuming the 0.0-1.0 grid spans 500 meters across
+                map_scale_meters = getattr(self.config, "map_scale_meters", 500.0)
+                geo_length = math.hypot(p1[0] - p2[0], p1[1] - p2[1]) * map_scale_meters
+                
+                # 2. Assign Road Tier and Speed (meters/tick)
+                road_tier = self.random_generator.choice(["local", "arterial", "highway"])
+                
+                match road_tier:
+                    case "highway":
+                        road_speed = 25.0   # e.g., ~90 km/h scaled to meters/tick
+                    case "arterial":
+                        road_speed = 14.0   # e.g., ~50 km/h scaled to meters/tick
+                    case "local" | _:
+                        road_speed = 8.0    # e.g., ~30 km/h scaled to meters/tick
+                
+                graph.add_edge(
+                    u_port, v_port, 
+                    weight=geo_length, 
+                    length=geo_length,
+                    max_speed=road_speed,
+                    edge_kind="road",
+                    tier=road_tier
+                )
 
     def _connect_internal_turns(self, graph: nx.DiGraph, neighbors_map: dict[int, list[int]], port_of: dict[tuple[int, int], int]) -> None:
         for center in range(self.config.num_nodes):
@@ -289,12 +312,17 @@ class TopologyBuilder:
                     src_meta = graph.nodes[src]
                     src_intersection = src_meta.get("intersection")
                     if src_intersection is not None and src_intersection != intersection_id:
+                        # Fetch live edge data attributes
+                        edge_data = graph.get_edge_data(src, local_port, default={})
+                        
                         neighbor_traffic_lights.add(src_intersection)
                         external_connections.append({
                             "direction": "incoming",
                             "neighbor_intersection": src_intersection,
                             "neighbor_port": src,
-                            "local_port": local_port
+                            "local_port": local_port,
+                            "length": edge_data.get("length", 100.0),       # Added here
+                            "max_speed": edge_data.get("max_speed", 13.89)  # Added here
                         })
 
                 # Look at external roads going OUT of this intersection
@@ -302,12 +330,17 @@ class TopologyBuilder:
                     dst_meta = graph.nodes[dst]
                     dst_intersection = dst_meta.get("intersection")
                     if dst_intersection is not None and dst_intersection != intersection_id:
+                        # Fetch live edge data attributes
+                        edge_data = graph.get_edge_data(local_port, dst, default={})
+                        
                         neighbor_traffic_lights.add(dst_intersection)
                         external_connections.append({
                             "direction": "outgoing",
                             "neighbor_intersection": dst_intersection,
                             "neighbor_port": dst,
-                            "local_port": local_port
+                            "local_port": local_port,
+                            "length": edge_data.get("length", 100.0),       # Added here
+                            "max_speed": edge_data.get("max_speed", 13.89)  # Added here
                         })
             # -------------------------------------------------------------
 
@@ -360,6 +393,17 @@ class TopologyBuilder:
     def _add_directed(self, graph: nx.DiGraph, u: int, v: int, edge_kind: str) -> None:
         if graph.has_edge(u, v):
             return
+
+        INTERNAL_LENGTH = 15.0  # meters
+        INTERNAL_SPEED = INTERNAL_LENGTH / 3.0  # 5.0 meters/tick
+
         p1, p2 = graph.nodes[u]["pos"], graph.nodes[v]["pos"]
-        dist = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
-        graph.add_edge(u, v, weight=dist, edge_kind=edge_kind)
+        #dist = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
+        graph.add_edge(
+            u, 
+            v, 
+            weight=INTERNAL_LENGTH, 
+            edge_kind=edge_kind,
+            length=INTERNAL_LENGTH,
+            max_speed=INTERNAL_SPEED
+        )

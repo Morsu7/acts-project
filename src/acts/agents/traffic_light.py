@@ -22,10 +22,10 @@ class ControlledDirection:
 
 class IncomingTrafficWave:
     """A group of cars that are approaching the traffic light from a specific direction."""
-    def __init__(self, source_id: str, num_cars: int):
+    def __init__(self, source_id: str, num_cars: int, expected_arrival_time: int):
         self.source_id = source_id
         self.num_cars = num_cars
-        self.expected_arrival_time = 5  # TODO: calculate using distance and average speed of the cars. For now, we assume a fixed time of 5 ticks.
+        self.expected_arrival_time = expected_arrival_time
 
 class TrafficLightAgent(SystemAgent):
 
@@ -35,13 +35,14 @@ class TrafficLightAgent(SystemAgent):
     TIME_BETWEEN_REQUESTS = 3 # How often I can ask for green (In mesa ticks)
     TIME_BETWEEN_SIGNALS = 5 # How often I can tell a neighbour about incoming traffic (In mesa ticks)
     UNCERTAINTY_FACTOR = 0.5 # How much weight to give to incoming traffic when computing the score
+    INTERSECTION_CROSSING_TIME = 3 # How long it takes for a car to cross the intersection (In mesa ticks)
 
-    def __init__(self, unique_id, model, intersection_id, node_id, controlled_directions, inter_neighbors=None, outgoing_external_neighbors=None):
+    def __init__(self, unique_id, model, intersection_id, node_id, controlled_directions, inter_neighbors=None, outgoing_external_neighbors_travel_times=None):
         super().__init__(unique_id, model, f"channel_{intersection_id}")
         self.intersection_id = intersection_id
         self.node_id = node_id
         self.num_neighbors = inter_neighbors
-        self.outgoing_external_neighbors = outgoing_external_neighbors
+        self.outgoing_external_neighbors_travel_times = outgoing_external_neighbors_travel_times
         self.ingoing_edges = None  # Wil l be lazily evaluated after every agent is placed
         self.lamport_clock = 0
 
@@ -67,7 +68,7 @@ class TrafficLightAgent(SystemAgent):
 
         # Each direction independently checks
         for direction in self.directions:
-            if self._has_waiting_vehicles(direction):
+            if self._wants_green(direction):
                 match direction.state.runtime.status:
                     case LightStatus.RED:
                         if direction.state.time_since_last_request >= self.TIME_BETWEEN_REQUESTS:
@@ -75,8 +76,9 @@ class TrafficLightAgent(SystemAgent):
                             #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent a request to turn green for direction {direction.direction_id} with score {self._compute_score(direction)}\n")
                     case LightStatus.GREEN:
                         if direction.state.time_since_last_signal >= self.TIME_BETWEEN_SIGNALS:
-                            #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} is sending traffic signal for direction {direction.direction_id} with score {self._compute_score(direction)}\n")
-                            self._send_traffic_signal(direction)  # The signal is specific to the direction
+                            if direction.state.runtime.queue_length > 0:
+                                #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} is sending traffic signal for direction {direction.direction_id} with score {self._compute_score(direction)}\n")
+                                self._send_traffic_signal(direction)  # The signal is specific to the direction
                             
             direction.state.add_time_past(1)
 
@@ -99,7 +101,7 @@ class TrafficLightAgent(SystemAgent):
 
     def _get_ingoing_edges(self):   # lazy evaluation of ingoing edges, makes sure that each agent is already placed on the grid before trying to find them
         if self.ingoing_edges is None:
-            self.ingoing_edges = self._build_ingoing_edges(self.outgoing_external_neighbors)
+            self.ingoing_edges = self._build_ingoing_edges(self.outgoing_external_neighbors_travel_times.keys())
 
         return self.ingoing_edges
 
@@ -111,7 +113,7 @@ class TrafficLightAgent(SystemAgent):
         for source, _ in ingoing_edges:
             cell_agents = self.model.grid.get_cell_list_contents([source])
             for agent in cell_agents:
-                if getattr(agent, "unique_id", None) in getattr(self, "outgoing_external_neighbors", []):
+                if getattr(agent, "unique_id", None) in getattr(self, "outgoing_external_neighbors_travel_times", []).keys():
                     neighbor_node_ids.add(source)
                     break # Found the matching external neighbor agent on this node
 
@@ -182,7 +184,7 @@ class TrafficLightAgent(SystemAgent):
             else:
                 direction_state.waiting_time = 0
 
-    def _has_waiting_vehicles(self, direction: ControlledDirection) -> bool:
+    def _wants_green(self, direction: ControlledDirection) -> bool:
         return 0 < self._compute_score(direction) < float('inf')
 
     def _compute_score(self, direction: ControlledDirection = None) -> float:
@@ -232,29 +234,26 @@ class TrafficLightAgent(SystemAgent):
         }
         self._send_event("ALLOW_GREEN", data)
 
-    # Send a message in the broadcast channel to inform incoming traffic
-    # direction contains information about the traffic lights that will send the traffic outside
     def _send_traffic_signal(self, direction: ControlledDirection):
-        score = self._compute_score(direction)
-        
         for id in direction.destinations_ids:
             data = {
                 "target_tl_id": id,
-                "queue_score": direction.state.runtime.queue_length
+                "num_cars": direction.state.runtime.queue_length
             }
             self._send_event("TRAFFIC_SIGNAL", data)
-            print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent traffic signal to {id} with score {score}\n")
+            print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent traffic signal to {id} with {data['num_cars']} cars\n")
         
         direction.state.time_since_last_signal = 0
 
     def _forward_traffic_signal(self, incoming_score: float):
-        for id in self.outgoing_external_neighbors:
+        for id, eta in self.outgoing_external_neighbors_travel_times.items():
             data = {
                 "target_tl_id": id,
-                "queue_score": incoming_score
+                "eta": eta + self.INTERSECTION_CROSSING_TIME,
+                "num_cars": incoming_score
             }
             self._send_event("TRAFFIC_SIGNAL_FORWARD", data, broadcast=True)
-            print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} forwarded traffic signal to {id} with score {incoming_score}\n")
+            print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} forwarded traffic signal to {id} with {incoming_score} cars\n")
 
     # When receiving a green permission, store it if not outdated
     def _store_permission(self, message):
@@ -285,11 +284,12 @@ class TrafficLightAgent(SystemAgent):
                     self._store_request(requester_id, requester_direction_id, requester_score, request_clock)
                 case "TRAFFIC_SIGNAL":
                     if msg["data"]["target_tl_id"] == self.unique_id:
-                        self._forward_traffic_signal(msg["data"]["queue_score"])
+                        self._forward_traffic_signal(msg["data"]["num_cars"])
                 case "TRAFFIC_SIGNAL_FORWARD":
                     if msg["data"]["target_tl_id"] == self.unique_id:
-                        print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} COULD receive traffic signal with score {msg['data']['queue_score']} from {msg['agent_id']}\n")
-                        wave = IncomingTrafficWave(source_id=msg["agent_id"], num_cars=msg["data"]["queue_score"])
+                        print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} COULD receive traffic signal with {msg['data']['num_cars']} cars from {msg['agent_id']}\n")
+                        wave = IncomingTrafficWave(source_id=msg["agent_id"], num_cars=msg["data"]["num_cars"], expected_arrival_time=msg["data"]["eta"])
+                        print(f"Made a wave from {msg['agent_id']} with {msg['data']['num_cars']} cars and ETA {msg['data']['eta']}\n")
                         self.possible_incoming_waves.append(wave)
 
         to_process = list(self.requests.keys())

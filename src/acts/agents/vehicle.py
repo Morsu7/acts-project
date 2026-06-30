@@ -10,13 +10,10 @@ from acts.utils.utils_agents import (
     select_destination,
 )
 from acts.agents.state import VehicleRuntimeState
-
 from acts.agents.publishing_agent import PublishingAgent
 
 class VehicleAgent(PublishingAgent):
     LOCK_TTL_SECONDS = 5
-    TRAVEL_TIME_SCALE = 60
-    MIN_TRAVEL_TICKS = 5
     STATE_QUEUED = "QUEUED"
     STATE_DRIVING = "DRIVING"
 
@@ -128,7 +125,6 @@ class VehicleAgent(PublishingAgent):
         if not self.runtime.path:
             if self.runtime.destination is None:
                 self.runtime.destination = select_destination(self.model.G, self.random, current_node)
-                #print(f"Vehicle {self.unique_id} selected new destination: {self.runtime.destination}")
             if self.runtime.destination is None:
                 return
             self._plan_from(current_node)
@@ -148,14 +144,18 @@ class VehicleAgent(PublishingAgent):
         if edge_state is not None and str(edge_state).upper() != "GREEN":
             return
 
-        dist = edge_data.get("weight", 0.5)
-        expected_timer = int(dist * self.TRAVEL_TIME_SCALE)
-        effective_timer = max(expected_timer, self.MIN_TRAVEL_TICKS)
+        # --- UPDATED MOVEMENT MATH: Physical parameters determine timing ---
+        # Internal edges pull 15.0m / 5.0m/tick (= 3 ticks)
+        # External roads pull real scaled meters / tier-specific velocity
+        length = edge_data.get("length", 15.0)
+        max_speed = edge_data.get("max_speed", 5.0)
+        
+        effective_timer = max(1, round(length / max_speed))
         
         self.runtime.travel_timer = effective_timer
         self.runtime.edge_total_timer = self.runtime.travel_timer
         self.runtime.next_node_buffer = next_node
-        # ---------------------------------
+        # -------------------------------------------------------------------
 
         # Rilascia il lock del nodo corrente prima di partire.
         key = f"lock_node_{current_node}"

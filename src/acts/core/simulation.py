@@ -70,22 +70,32 @@ class CityModel(Model):
                         "destinations": destinations
                     })
                             
-                # --- RECUPERO VICINI ESTERNI DAI METADATI ---
-                # Prendiamo il neighbor_port per tutte le connessioni esterne di questo specifico nodo
-                external_neighbor_nodes = sorted(list(set(
-                    f"tl_{conn["neighbor_port"]}" for conn in external_conns 
-                    if conn["local_port"] == node
-                )))
+                # --- RECUPERO VICINI ESTERNI E TEMPI DI PERCORRENZA DAI METADATI ---
+                external_neighbor_travel_times = {}
+                for conn in external_conns:
+                    if conn["local_port"] == node:
+                        neighbor_id = f"tl_{conn['neighbor_port']}"
+                        
+                        # Calculate ETA based on edge attributes provided by your topology/graph
+                        # Fallback to safety defaults if attributes are missing
+                        edge_length = conn.get("length", 100)      # in meters
+                        max_speed = conn.get("max_speed", 13.89)   # in m/tick
+                        
+                        # travel_time in seconds (or ticks, depending on your model scale)
+                        estimated_time = round(edge_length / max_speed)
+                        
+                        # Store it in the dictionary
+                        external_neighbor_travel_times[neighbor_id] = estimated_time
                 # ---------------------------------------------
 
                 tl = TrafficLightAgent(
-                    f"tl_{node}",                                   # unique_id
-                    self,                                           # model
-                    intersection_id,                                # intersection_id
-                    node_id=node,                                   # node_id
-                    inter_neighbors=len(intersection_nodes)-1,      # neighbors
-                    controlled_directions=structured_edge_groups,    # controlled_directions
-                    outgoing_external_neighbors=external_neighbor_nodes      # neighbors tl from other intersections
+                    f"tl_{node}",                                                                   # unique_id of the agent used in communication
+                    self,                                                                           # model used for redis communication and mesa scheduling
+                    intersection_id,                                                                # intersection_id used for redis communication
+                    node_id=node,                                                                   # node_id used for mesa interaction 
+                    inter_neighbors=len(intersection_nodes)-1,                                       
+                    controlled_directions=structured_edge_groups,                                   
+                    outgoing_external_neighbors_travel_times=external_neighbor_travel_times         
                 )
                 self.schedule.add(tl)
                 self.grid.place_agent(tl, node)     

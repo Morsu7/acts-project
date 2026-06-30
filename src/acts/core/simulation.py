@@ -50,8 +50,26 @@ class CityModel(Model):
             
             for node in intersection_nodes:
                 priority_edge_groups = meta.get("priority_edge_groups", [])
-                node_groups = [group for group in priority_edge_groups if any(node == edge[0] for edge in group)]
+                structured_edge_groups = []
                 
+                for group in priority_edge_groups:
+                    # 1. ONLY process this group if it belongs to the current traffic light node
+                    # (Checking if the source node 'edge[0]' matches our current 'node')
+                    if not any(edge[0] == node for edge in group):
+                        continue
+                        
+                    # 2. Gather unique target nodes, but strip out self-referencing links 
+                    # to ensure a traffic light never sends messages to itself
+                    destinations = list(set(
+                        f"tl_{edge[1]}" for edge in group 
+                        if edge[1] != node
+                    ))
+                    
+                    structured_edge_groups.append({
+                        "edges": group,
+                        "destinations": destinations
+                    })
+                            
                 # --- RECUPERO VICINI ESTERNI DAI METADATI ---
                 # Prendiamo il neighbor_port per tutte le connessioni esterne di questo specifico nodo
                 external_neighbor_nodes = sorted(list(set(
@@ -66,15 +84,15 @@ class CityModel(Model):
                     intersection_id,                                # intersection_id
                     node_id=node,                                   # node_id
                     inter_neighbors=len(intersection_nodes)-1,      # neighbors
-                    controlled_directions=node_groups,              # controlled_directions
-                    external_neighbors=external_neighbor_nodes      # neighbors tl from other intersections
+                    controlled_directions=structured_edge_groups,    # controlled_directions
+                    outgoing_external_neighbors=external_neighbor_nodes      # neighbors tl from other intersections
                 )
                 self.schedule.add(tl)
                 self.grid.place_agent(tl, node)     
                 self.G.nodes[node]["traffic_light_id"] = tl.unique_id
 
-                for group_idx, group in enumerate(node_groups):
-                    for edge in group:
+                for group_idx, group in enumerate(structured_edge_groups):
+                    for edge in group["edges"]:
                         if self.G.has_edge(edge[0], edge[1]):
                             self.G[edge[0]][edge[1]]["tl_group_id"] = f"{node}_group{group_idx}"
 

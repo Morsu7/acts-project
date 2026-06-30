@@ -1,7 +1,7 @@
 from acts.utils.utils_agents import _is_vehicle_agent
 from acts.agents.state import DirectionState, TrafficLightRuntimeState, LightStatus
 
-from acts.agents.publishing_agent import PublishingAgent
+from acts.agents.system_agent import SystemAgent
 
 from dataclasses import dataclass, field
 
@@ -14,38 +14,50 @@ class Request:
 
 class ControlledDirection:
     """A group of edges that change color together."""
-    def __init__(self, direction_id: str, edges: list):
+    def __init__(self, direction_id: str, edges: list, destinations_ids: list):
         self.direction_id = direction_id
         self.edges = edges
+        self.destinations_ids = destinations_ids
         self.state = DirectionState()
 
-class TrafficLightAgent(PublishingAgent):
+class IncomingTrafficWave:
+    """A group of cars that are approaching the traffic light from a specific direction."""
+    def __init__(self, source_id: str, num_cars: int):
+        self.source_id = source_id
+        self.num_cars = num_cars
+        self.expected_arrival_time = 5  # TODO: calculate using distance and average speed of the cars. For now, we assume a fixed time of 5 ticks.
+
+class TrafficLightAgent(SystemAgent):
 
     # PARAMETERS (TODO: make them configurable and move them to a config file)
     MIN_GREEN_TIME = 5
     YELLOW_TIME = 2
-    TIME_BETWEEN_REQUESTS = 3 # In mesa ticks
+    TIME_BETWEEN_REQUESTS = 3 # How often I can ask for green (In mesa ticks)
+    TIME_BETWEEN_SIGNALS = 5 # How often I can tell a neighbour about incoming traffic (In mesa ticks)
+    UNCERTAINTY_FACTOR = 0.5 # How much weight to give to incoming traffic when computing the score
 
-    def __init__(self, unique_id, model, intersection_id, node_id, controlled_directions, inter_neighbors=None, external_neighbors=None):
+    def __init__(self, unique_id, model, intersection_id, node_id, controlled_directions, inter_neighbors=None, outgoing_external_neighbors=None):
         super().__init__(unique_id, model, f"channel_{intersection_id}")
         self.intersection_id = intersection_id
         self.node_id = node_id
         self.num_neighbors = inter_neighbors
-        self.external_neighbors = external_neighbors
+        self.outgoing_external_neighbors = outgoing_external_neighbors
         self.ingoing_edges = None  # Wil l be lazily evaluated after every agent is placed
         self.lamport_clock = 0
 
         # Turn the groups of edges in ControlledDirection objects
         #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} controls the following directions: {controlled_directions}")
         self.directions: list[ControlledDirection] = [
-            ControlledDirection(direction_id=f"{self.unique_id}_dir{i}", edges=edges)
-            for i, edges in enumerate(controlled_directions)
+            ControlledDirection(
+                direction_id=f"{self.unique_id}_dir{i}", 
+                edges=direction["edges"], 
+                destinations_ids=direction["destinations"])
+            for i, direction in enumerate(controlled_directions)
         ]
 
-        self.controlled_directions = controlled_directions  # Independent groups of edges controlled by this traffic light.
-                                                            # Each edge in a group has to be green at the same time, while edges in different groups can be green independently.
-
         self.requests: dict[str, Request] = {}
+
+        self.possible_incoming_waves: list[IncomingTrafficWave] = []
 
     # Public API: called by Mesa scheduler.
     def step(self):
@@ -55,21 +67,39 @@ class TrafficLightAgent(PublishingAgent):
 
         # Each direction independently checks
         for direction in self.directions:
-            if direction.state.runtime.status == LightStatus.RED and self._has_waiting_vehicles(direction):
-                if direction.state.time_since_last_request >= self.TIME_BETWEEN_REQUESTS:
-                    self._request_green_light(direction)    # The request is specific to the direction
-                    #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent a request to turn green for direction {direction.direction_id} with score {self._compute_score(direction)}\n")
-            direction.state.time_since_last_request += 1
-        
+            if self._has_waiting_vehicles(direction):
+                match direction.state.runtime.status:
+                    case LightStatus.RED:
+                        if direction.state.time_since_last_request >= self.TIME_BETWEEN_REQUESTS:
+                            self._request_green_light(direction)    # The request is specific to the direction
+                            #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent a request to turn green for direction {direction.direction_id} with score {self._compute_score(direction)}\n")
+                    case LightStatus.GREEN:
+                        if direction.state.time_since_last_signal >= self.TIME_BETWEEN_SIGNALS:
+                            #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} is sending traffic signal for direction {direction.direction_id} with score {self._compute_score(direction)}\n")
+                            self._send_traffic_signal(direction)  # The signal is specific to the direction
+                            
+            direction.state.add_time_past(1)
+
+        self._update_incoming_waves_ETA()
         self._update_graph()
 
-    def _send_event(self, event_type, data):
+    def _update_incoming_waves_ETA(self):
+        for wave in self.possible_incoming_waves:
+            wave.expected_arrival_time -= 1
+
+        # Remove waves that should be arrived if existent
+        self.possible_incoming_waves = [wave for wave in self.possible_incoming_waves if wave.expected_arrival_time > 0]
+
+    def _send_event(self, event_type, data, broadcast=False):
         self.lamport_clock += 1
-        self.publish_event(event_type, data, self.lamport_clock)
+        if broadcast:
+            self.broadcast_message(event_type, data, self.lamport_clock)
+        else:
+            self.publish_event(event_type, data, self.lamport_clock)
 
     def _get_ingoing_edges(self):   # lazy evaluation of ingoing edges, makes sure that each agent is already placed on the grid before trying to find them
         if self.ingoing_edges is None:
-            self.ingoing_edges = self._build_ingoing_edges(self.external_neighbors)
+            self.ingoing_edges = self._build_ingoing_edges(self.outgoing_external_neighbors)
 
         return self.ingoing_edges
 
@@ -81,7 +111,7 @@ class TrafficLightAgent(PublishingAgent):
         for source, _ in ingoing_edges:
             cell_agents = self.model.grid.get_cell_list_contents([source])
             for agent in cell_agents:
-                if getattr(agent, "unique_id", None) in getattr(self, "external_neighbors", []):
+                if getattr(agent, "unique_id", None) in getattr(self, "outgoing_external_neighbors", []):
                     neighbor_node_ids.add(source)
                     break # Found the matching external neighbor agent on this node
 
@@ -153,16 +183,14 @@ class TrafficLightAgent(PublishingAgent):
                 direction_state.waiting_time = 0
 
     def _has_waiting_vehicles(self, direction: ControlledDirection) -> bool:
-        return direction.state.runtime.queue_length > 0
+        return 0 < self._compute_score(direction) < float('inf')
 
     def _compute_score(self, direction: ControlledDirection = None) -> float:
-        match direction.state.runtime.status:
-            case LightStatus.GREEN if direction.state.runtime.status_time < self.MIN_GREEN_TIME:
-                return 1000  # Maximum priority. Light must not change to red before minimum green time is reached.
-            case LightStatus.YELLOW:
-                return 1000  # Maximum priority to keep light until time is up
+        own_score = direction.state.runtime.queue_length * (direction.state.runtime.waiting_time + 1)     # +1 to avoid zero score
+
+        score = own_score + sum(wave.num_cars / (1 + (wave.expected_arrival_time / 10)) for wave in self.possible_incoming_waves) * self.UNCERTAINTY_FACTOR
         
-        return direction.state.runtime.queue_length * (direction.state.runtime.waiting_time + 1)  # +1 to avoid zero score
+        return score
 
     def _request_green_light(self, direction: ControlledDirection):
         # Send a request to the intersection controller (or other traffic lights) to turn green
@@ -204,6 +232,30 @@ class TrafficLightAgent(PublishingAgent):
         }
         self._send_event("ALLOW_GREEN", data)
 
+    # Send a message in the broadcast channel to inform incoming traffic
+    # direction contains information about the traffic lights that will send the traffic outside
+    def _send_traffic_signal(self, direction: ControlledDirection):
+        score = self._compute_score(direction)
+        
+        for id in direction.destinations_ids:
+            data = {
+                "target_tl_id": id,
+                "queue_score": direction.state.runtime.queue_length
+            }
+            self._send_event("TRAFFIC_SIGNAL", data)
+            print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent traffic signal to {id} with score {score}\n")
+        
+        direction.state.time_since_last_signal = 0
+
+    def _forward_traffic_signal(self, incoming_score: float):
+        for id in self.outgoing_external_neighbors:
+            data = {
+                "target_tl_id": id,
+                "queue_score": incoming_score
+            }
+            self._send_event("TRAFFIC_SIGNAL_FORWARD", data, broadcast=True)
+            print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} forwarded traffic signal to {id} with score {incoming_score}\n")
+
     # When receiving a green permission, store it if not outdated
     def _store_permission(self, message):
         message_data = message["data"]
@@ -215,7 +267,8 @@ class TrafficLightAgent(PublishingAgent):
 
     def _receive_messages(self):
         # filter per message type and update the requests dictionary
-        messages = self.get_messages() or []
+        messages = [*self.get_messages(), *self.get_broadcast_messages()]
+
         for msg in messages:
             self.lamport_clock = max(self.lamport_clock, msg["clock"]) + 1
             match msg['event']:
@@ -230,6 +283,14 @@ class TrafficLightAgent(PublishingAgent):
                     requester_score = msg["data"]["queue_score"]
                     request_clock = msg["clock"]
                     self._store_request(requester_id, requester_direction_id, requester_score, request_clock)
+                case "TRAFFIC_SIGNAL":
+                    if msg["data"]["target_tl_id"] == self.unique_id:
+                        self._forward_traffic_signal(msg["data"]["queue_score"])
+                case "TRAFFIC_SIGNAL_FORWARD":
+                    if msg["data"]["target_tl_id"] == self.unique_id:
+                        print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} COULD receive traffic signal with score {msg['data']['queue_score']} from {msg['agent_id']}\n")
+                        wave = IncomingTrafficWave(source_id=msg["agent_id"], num_cars=msg["data"]["queue_score"])
+                        self.possible_incoming_waves.append(wave)
 
         to_process = list(self.requests.keys())
         for id in to_process:
@@ -254,6 +315,12 @@ class TrafficLightAgent(PublishingAgent):
     def _can_give_permission(self, request: Request) -> bool:
         # TODO: check based on constraint groups
         for direction in self.directions:
+            match direction.state.runtime.status:
+                case LightStatus.GREEN if direction.state.runtime.status_time < self.MIN_GREEN_TIME:
+                    return False            # Maximum priority. Light must not change to red before minimum green time is reached.
+                case LightStatus.YELLOW:
+                    return False            # Maximum priority to keep light until time is up
+
             if self._compute_score(direction) > request.requester_score:
                 #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} cannot grant permission to {request.requester_id} for direction {request.requester_direction_id} because its score ({self._compute_score(direction)}) is higher than the requester's score ({request.requester_score})\n")
                 return False

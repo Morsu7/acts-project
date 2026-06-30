@@ -9,7 +9,7 @@ from acts.utils.utils_agents import (
     heuristic_euclidean,
     select_destination,
 )
-from acts.agents.state.vehicle_state import VehicleRuntimeState
+from acts.agents.state import VehicleRuntimeState
 
 from acts.agents.publishing_agent import PublishingAgent
 
@@ -148,18 +148,9 @@ class VehicleAgent(PublishingAgent):
         if edge_state is not None and str(edge_state).upper() != "GREEN":
             return
 
-        # --- TIMER DIAGNOSTIC PRINTING ---
         dist = edge_data.get("weight", 0.5)
         expected_timer = int(dist * self.TRAVEL_TIME_SCALE)
         effective_timer = max(expected_timer, self.MIN_TRAVEL_TICKS)
-        
-        print(
-            f"[Car {self.unique_id}] Edge: {current_node} -> {next_node} | "
-            f"Weight: {dist:.2f} | "
-            f"Expected Ticks: {expected_timer} | "
-            f"Effective Ticks (Applied): {effective_timer}"
-            f"{' (Capped by MIN_TRAVEL_TICKS)' if expected_timer < self.MIN_TRAVEL_TICKS else ''}"
-        )
         
         self.runtime.travel_timer = effective_timer
         self.runtime.edge_total_timer = self.runtime.travel_timer

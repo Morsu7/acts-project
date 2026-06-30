@@ -1,5 +1,5 @@
 from acts.utils.utils_agents import _is_vehicle_agent
-from acts.agents.state.traffic_light_state import TrafficLightRuntimeState, LightStatus
+from acts.agents.state import DirectionState, TrafficLightRuntimeState, LightStatus
 
 from acts.agents.publishing_agent import PublishingAgent
 
@@ -11,14 +11,6 @@ class Request:
     requester_direction_id: str
     requester_score: float
     request_clock: int
-
-@dataclass
-class DirectionState:   # Each indipendent group of edges controlled by a traffic light has its own state
-    runtime: TrafficLightRuntimeState = field(default_factory=TrafficLightRuntimeState)
-    permissions: dict = field(default_factory=dict)     # Dictionary to store agents that have granted permission to turn green
-    time_since_last_request: int = 0                    # Counter to track time since the last request was sent
-    request_clock: int = 0                              # Lamport clock value when the last request was sent
-    must_turn_yellow: bool = False                      # Flag to indicate if the light must turn yellow (before giving permission to another traffic light)
 
 class ControlledDirection:
     """A group of edges that change color together."""
@@ -141,7 +133,7 @@ class TrafficLightAgent(PublishingAgent):
                 for v in driving_vehicles_on_edge:
                     if v.state == "DRIVING" and v.travel_timer <= NEAR_TRAFFIC_LIGHT_THRESHOLD:
                         if v.path and len(v.path) > 2:
-                            print(f"car path: {v.path}\n")
+                            #print(f"car path: {v.path}\n")
                             # path[1] is this light. path[2] is their downstream turn.
                             downstream_node_intent = v.path[2]
                             

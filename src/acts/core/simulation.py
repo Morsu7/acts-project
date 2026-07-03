@@ -44,26 +44,67 @@ class CityModel(Model):
 
         # 3. Creazione degli agenti: Semafori
         for intersection_id, intersection_nodes in self.intersection_nodes.items():
+            # Recuperiamo i metadati di questa intersezione configurati dal TopologyBuilder
+            meta = self.intersection_meta.get(intersection_id, {})
+            external_conns = meta.get("external_connections", [])
+            
             for node in intersection_nodes:
-                priority_edge_groups = self.intersection_meta.get(intersection_id, {}).get("priority_edge_groups", [])
-                node_groups = [group for group in priority_edge_groups if any(node == edge[0] for edge in group)]
+                priority_edge_groups = meta.get("priority_edge_groups", [])
+                structured_edge_groups = []
+                
+                for group in priority_edge_groups:
+                    # 1. ONLY process this group if it belongs to the current traffic light node
+                    # (Checking if the source node 'edge[0]' matches our current 'node')
+                    if not any(edge[0] == node for edge in group):
+                        continue
+                        
+                    # 2. Gather unique target nodes, but strip out self-referencing links 
+                    # to ensure a traffic light never sends messages to itself
+                    destinations = list(set(
+                        f"tl_{edge[1]}" for edge in group 
+                        if edge[1] != node
+                    ))
+                    
+                    structured_edge_groups.append({
+                        "edges": group,
+                        "destinations": destinations
+                    })
+                            
+                # --- RECUPERO VICINI ESTERNI E TEMPI DI PERCORRENZA DAI METADATI ---
+                external_neighbor_travel_times = {}
+                for conn in external_conns:
+                    if conn["local_port"] == node:
+                        neighbor_id = f"tl_{conn['neighbor_port']}"
+                        
+                        # Calculate ETA based on edge attributes provided by your topology/graph
+                        # Fallback to safety defaults if attributes are missing
+                        edge_length = conn.get("length", 100)      # in meters
+                        max_speed = conn.get("max_speed", 13.89)   # in m/tick
+                        
+                        # travel_time in seconds (or ticks, depending on your model scale)
+                        estimated_time = round(edge_length / max_speed)
+                        
+                        # Store it in the dictionary
+                        external_neighbor_travel_times[neighbor_id] = estimated_time
+                # ---------------------------------------------
+
                 tl = TrafficLightAgent(
-                    f"tl_{node}",                           # unique_id
-                    self,                                   # model
-                    intersection_id,                        # intersection_id
-                    node_id=node,                           # node_id
-                    neighbors=len(intersection_nodes)-1,    # neighbors
-                    controlled_directions=node_groups       # controlled_directions
+                    f"tl_{node}",                                                                   # unique_id of the agent used in communication
+                    self,                                                                           # model used for redis communication and mesa scheduling
+                    intersection_id,                                                                # intersection_id used for redis communication
+                    node_id=node,                                                                   # node_id used for mesa interaction 
+                    inter_neighbors=len(intersection_nodes)-1,                                       
+                    controlled_directions=structured_edge_groups,                                   
+                    outgoing_external_neighbors_travel_times=external_neighbor_travel_times         
                 )
                 self.schedule.add(tl)
-                self.grid.place_agent(tl, node)     # Ogni Agente Semaforo viene posizionato sul nodo corrispondente
+                self.grid.place_agent(tl, node)     
                 self.G.nodes[node]["traffic_light_id"] = tl.unique_id
 
-                for group_idx, group in enumerate(node_groups):
-                    for edge in group:
+                for group_idx, group in enumerate(structured_edge_groups):
+                    for edge in group["edges"]:
                         if self.G.has_edge(edge[0], edge[1]):
                             self.G[edge[0]][edge[1]]["tl_group_id"] = f"{node}_group{group_idx}"
-                #print(f"Nodes\n {self.G.nodes[node]}")
 
         # 4. Creazione dei Veicoli: External Agents (The System reacts to them, but they are not part of the system)
         for i in range(self.num_cars):

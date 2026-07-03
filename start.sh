@@ -32,9 +32,6 @@ fi
 # shellcheck disable=SC1091
 source venv/bin/activate
 
-echo "Upgrading pip..."
-python3 -m pip install --upgrade pip
-
 if [[ -f "requirements.txt" ]]; then
   echo "Installing dependencies from requirements.txt..."
   pip3 install -r requirements.txt

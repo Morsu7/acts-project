@@ -9,14 +9,11 @@ from acts.utils.utils_agents import (
     heuristic_euclidean,
     select_destination,
 )
-from acts.agents.state.vehicle_state import VehicleRuntimeState
-
+from acts.agents.state import VehicleRuntimeState
 from acts.agents.publishing_agent import PublishingAgent
 
 class VehicleAgent(PublishingAgent):
     LOCK_TTL_SECONDS = 5
-    TRAVEL_TIME_SCALE = 20
-    MIN_TRAVEL_TICKS = 5
     STATE_QUEUED = "QUEUED"
     STATE_DRIVING = "DRIVING"
 
@@ -45,6 +42,37 @@ class VehicleAgent(PublishingAgent):
     def edge_total_timer(self) -> int:
         return self.runtime.edge_total_timer
 
+    @property
+    def edge_completion_ratio(self) -> float:
+        """Returns the vehicle's position along the current edge as a ratio from 0.0 to 1.0."""
+        if self.state != self.STATE_DRIVING or self.edge_total_timer <= 0:
+            return 0.0
+        
+        # Ticks spent driving on this edge
+        ticks_driven = self.edge_total_timer - self.travel_timer
+        
+        # Return progression ratio clamped between 0 and 1
+        return min(1.0, max(0.0, ticks_driven / self.edge_total_timer))
+
+    @property
+    def current_or_target_node(self) -> Optional[tuple[int, int]]:
+        """
+        Restituisce l'id dell'arco (u, v) che la macchina sta attraversando 
+        o che ha intenzione di attraversare al prossimo passo. 
+        Restituisce None se non ci sono archi disponibili o pianificati.
+        """
+        # Se il veicolo sta guidando, l'arco è definito tra la posizione attuale 
+        # (che Mesa aggiorna solo all'arrivo) e il nodo memorizzato nel buffer.
+        if self.state == self.STATE_DRIVING and self.runtime.next_node_buffer is not None:
+            return (self.pos, self.runtime.next_node_buffer)
+        
+        # Se il veicolo è in coda (QUEUED) e ha un percorso pianificato valido,
+        # l'arco target è quello tra il nodo attuale e il prossimo nel path.
+        if self.state == self.STATE_QUEUED and len(self.runtime.path) > 1:
+            return (self.pos, self.runtime.path[1])
+            
+        return None
+
     # Public API: called by Mesa scheduler.
     def step(self):
         # Aggiornamento del veicolo per un singolo tick.
@@ -54,8 +82,18 @@ class VehicleAgent(PublishingAgent):
         elif self.state == self.STATE_DRIVING:
             self.runtime.travel_timer -= 1
             if self.runtime.travel_timer <= 0:
-                # Arrivo: sposta il veicolo e resetta lo stato di viaggio.
-                self.model.grid.move_agent(self, self.runtime.next_node_buffer)
+                # --- FIX: Safe Edge-to-Node Arrival Transition ---
+                # 1. Unregister this vehicle from the current NetworkX edge list
+                from_node, to_node = self.pos
+                if "vehicles" in self.model.G[from_node][to_node]:
+                    if self in self.model.G[from_node][to_node]["vehicles"]:
+                        self.model.G[from_node][to_node]["vehicles"].remove(self)
+                
+                # 2. Safely land the agent onto its physical node back inside Mesa
+                next_node = self.runtime.next_node_buffer
+                self.model.grid.place_agent(self, next_node)
+                # --------------------------------------------------
+
                 self.runtime.path.pop(0)
                 self.runtime.status = self.STATE_QUEUED
                 self.runtime.edge_total_timer = 0
@@ -87,7 +125,6 @@ class VehicleAgent(PublishingAgent):
         if not self.runtime.path:
             if self.runtime.destination is None:
                 self.runtime.destination = select_destination(self.model.G, self.random, current_node)
-                #print(f"Vehicle {self.unique_id} selected new destination: {self.runtime.destination}")
             if self.runtime.destination is None:
                 return
             self._plan_from(current_node)
@@ -107,16 +144,36 @@ class VehicleAgent(PublishingAgent):
         if edge_state is not None and str(edge_state).upper() != "GREEN":
             return
 
-        dist = edge_data.get("weight", 0.5)
-        timer = int(dist * self.TRAVEL_TIME_SCALE)
-        self.runtime.travel_timer = max(timer, self.MIN_TRAVEL_TICKS)
+        # --- UPDATED MOVEMENT MATH: Physical parameters determine timing ---
+        # Internal edges pull 15.0m / 5.0m/tick (= 3 ticks)
+        # External roads pull real scaled meters / tier-specific velocity
+        length = edge_data.get("length", 15.0)
+        max_speed = edge_data.get("max_speed", 5.0)
+        
+        effective_timer = max(1, round(length / max_speed))
+        
+        self.runtime.travel_timer = effective_timer
         self.runtime.edge_total_timer = self.runtime.travel_timer
         self.runtime.next_node_buffer = next_node
+        # -------------------------------------------------------------------
 
         # Rilascia il lock del nodo corrente prima di partire.
         key = f"lock_node_{current_node}"
         #release_lock_if_owner(self.redis_client, key=key, owner_id=self.unique_id)
         self.runtime.status = self.STATE_DRIVING
+
+        # --- FIX: Safe Edge Tracking ---
+        # 1. Remove agent from the old node room in Mesa's space
+        self.model.grid.remove_agent(self)
+        
+        # 2. Track the agent inside the networkx edge data dictionary
+        if "vehicles" not in edge_data:
+            self.model.G[current_node][next_node]["vehicles"] = []
+        self.model.G[current_node][next_node]["vehicles"].append(self)
+        
+        # 3. Keep a logical reference on the agent itself for its position
+        self.pos = (current_node, next_node) 
+        # -------------------------------
 
         self.publish_event(
             "DEPARTING",

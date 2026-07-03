@@ -248,42 +248,39 @@ class TopologyBuilder:
                 self._add_directed(graph, source_port, target_port, edge_kind="turn")
 
                 for extra_target in available_targets:
-                    if extra_target != target_port and self.random_generator.random() < self.config.extra_turn_probability:
+                    if extra_target != target_port and self.random_generator.random() < getattr(self.config, 'extra_turn_probability', 0.2):
                         self._add_directed(graph, source_port, extra_target, edge_kind="turn")
 
-            # --- CORREZIONE COMPLETA DEI GRADI DI CONNETTIVITÀ INTERNA ---
-            # Isoliando l'incrocio, nessun port deve avere in_degree interno == 0 o out_degree interno == 0.
             for port in local_ports:
                 other_ports = [p for p in local_ports if p != port]
                 if not other_ports:
                     continue
                 
-                # Calcola quanti archi INTERNI (svolte) ENTRANO in questo port
-                internal_in_edges = [s for s, t in graph.in_edges(port) if s in local_ports]
-                
-                # SE NON ENTRA NESSUN ARCO INTERNO (Il tuo caso specifico: era un nodo di sola uscita interna)
-                if not internal_in_edges:
-                    p_pos = graph.nodes[port]["pos"]
-                    # Trova il port interno dell'incrocio geometricamente più vicino
-                    closest_source = min(
-                        other_ports, 
-                        key=lambda op: math.hypot(graph.nodes[op]["pos"][0] - p_pos[0], graph.nodes[op]["pos"][1] - p_pos[1])
-                    )
-                    # Forza una svolta interna dal port più vicino verso questo port
-                    self._add_directed(graph, closest_source, port, edge_kind="turn_fix_internal_in")
+                # Se da questo port si può uscire verso l'esterno, deve ricevere traffico interno
+                if port in exit_ports:
+                    internal_in_edges = [s for s, t in graph.in_edges(port) if s in local_ports]
+                    if not internal_in_edges:
+                        p_pos = graph.nodes[port]["pos"]
+                        # Cerca il nodo di ingresso più vicino. Se non ce ne sono, prendi un nodo qualsiasi.
+                        valid_sources = [p for p in entry_ports if p != port] or other_ports
+                        closest_source = min(
+                            valid_sources, 
+                            key=lambda op: math.hypot(graph.nodes[op]["pos"][0] - p_pos[0], graph.nodes[op]["pos"][1] - p_pos[1])
+                        )
+                        self._add_directed(graph, closest_source, port, edge_kind="turn_fix_internal_in")
 
-                # Calcola quanti archi INTERNI (svolte) ESCONO da questo port
-                internal_out_edges = [t for s, t in graph.out_edges(port) if t in local_ports]
-                
-                # SE NON ESCE NESSUN ARCO INTERNO (Nodo di sola entrata interna)
-                if not internal_out_edges:
-                    p_pos = graph.nodes[port]["pos"]
-                    closest_target = min(
-                        other_ports, 
-                        key=lambda op: math.hypot(graph.nodes[op]["pos"][0] - p_pos[0], graph.nodes[op]["pos"][1] - p_pos[1])
-                    )
-                    # Forza una svolta interna da questo port verso il port più vicino
-                    self._add_directed(graph, port, closest_target, edge_kind="turn_fix_internal_out")
+                # Se da questo port si entra dall'esterno, deve smistare traffico verso l'interno
+                if port in entry_ports:
+                    internal_out_edges = [t for s, t in graph.out_edges(port) if t in local_ports]
+                    if not internal_out_edges:
+                        p_pos = graph.nodes[port]["pos"]
+                        # Cerca il nodo di uscita più vicino. Se non ce ne sono, prendi un nodo qualsiasi.
+                        valid_targets = [p for p in exit_ports if p != port] or other_ports
+                        closest_target = min(
+                            valid_targets, 
+                            key=lambda op: math.hypot(graph.nodes[op]["pos"][0] - p_pos[0], graph.nodes[op]["pos"][1] - p_pos[1])
+                        )
+                        self._add_directed(graph, port, closest_target, edge_kind="turn_fix_internal_out")
 
     def _check_road_direction(self, graph: nx.DiGraph, node_id: int, intersection_id: int, is_incoming: bool) -> bool:
         edges = graph.in_edges(node_id, data=True) if is_incoming else graph.out_edges(node_id, data=True)

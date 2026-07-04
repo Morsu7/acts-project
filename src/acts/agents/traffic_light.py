@@ -313,19 +313,27 @@ class TrafficLightAgent(SystemAgent):
         return all(direction.state.runtime.status == LightStatus.RED for direction in self.directions)
             
     def _can_give_permission(self, request: Request) -> bool:
-        # TODO: check based on constraint groups
+        phases = self.model.intersection_meta[self.intersection_id].get("phases", {})
+        requester_phase = phases.get(request.requester_direction_id)
+
         for direction in self.directions:
+            my_phase = phases.get(direction.direction_id)
+
+            # skip blocks if we share the same green phase
+            if my_phase is not None and my_phase == requester_phase:
+                continue
+
             match direction.state.runtime.status:
                 case LightStatus.GREEN if direction.state.runtime.status_time < self.MIN_GREEN_TIME:
-                    return False            # Maximum priority. Light must not change to red before minimum green time is reached.
+                    return False            # enforce minimum green time
                 case LightStatus.YELLOW:
-                    return False            # Maximum priority to keep light until time is up
+                    return False            # wait for yellow to finish
 
+            # deny if we have more traffic waiting
             if self._compute_score(direction) > request.requester_score:
-                #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} cannot grant permission to {request.requester_id} for direction {request.requester_direction_id} because its score ({self._compute_score(direction)}) is higher than the requester's score ({request.requester_score})\n")
                 return False
                 
-        return True  # TEMPORARY: If no direction has a higher score, grant permission
+        return True
 
     def _store_request(self, requester_id: str, requester_direction_id: str, requester_score: float, request_clock: int) -> None:
         existing = self.requests.get(requester_direction_id)

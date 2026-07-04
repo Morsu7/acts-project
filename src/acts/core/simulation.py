@@ -10,7 +10,7 @@ class CityModel(Model):
         super().__init__()
         self.num_cars = int(N)
         
-        # 1. Grafo
+        # Grafo
         # Ogni nodo rappresenta un semaforo in un incrocio. Ciascun semaforo contiene un riferimento
         # all'incrocio a cui appartiene.
         # Un arco puo' essere una strada interna all'incrocio (gestita dal semaforo) oppure una esterna
@@ -21,7 +21,7 @@ class CityModel(Model):
         #print(f"{self.G.nodes(data=True)}\n")
         #print(f"{self.G.edges(data=True)}\n")
         
-        # 2. Spazio standard Mesa in cui gli agenti sono posizionati sui nodi del grafo
+        # Spazio standard Mesa in cui gli agenti sono posizionati sui nodi del grafo
         self.grid = NetworkGrid(self.G)
         self.schedule = RandomActivation(self)
         self.running = True
@@ -42,7 +42,7 @@ class CityModel(Model):
         #print(f"{self.intersection_nodes}\n")
         #print(f"{self.intersection_meta}\n")
 
-        # 3. Creazione degli agenti: Semafori
+        # Creazione degli agenti: Semafori
         for intersection_id, intersection_nodes in self.intersection_nodes.items():
             # Recuperiamo i metadati di questa intersezione configurati dal TopologyBuilder
             meta = self.intersection_meta.get(intersection_id, {})

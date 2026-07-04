@@ -228,7 +228,7 @@ class TopologyBuilder:
             if len(local_neighbors) <= 1:
                 if len(local_neighbors) == 1:
                     port = port_of[(center, local_neighbors[0])]
-                    self._add_directed(graph, port, port, edge_kind="u_turn", weight=999999.0)
+                    self._add_directed(graph, port, port, edge_kind="u_turn")
                 continue
 
             local_ports = [port_of[(center, other)] for other in local_neighbors]
@@ -248,7 +248,7 @@ class TopologyBuilder:
                 self._add_directed(graph, source_port, target_port, edge_kind="turn")
 
                 for extra_target in available_targets:
-                    if extra_target != target_port and self.random_generator.random() < getattr(self.config, 'extra_turn_probability', 0.2):
+                    if extra_target != target_port and self.random_generator.random() < self.config.extra_turn_probability:
                         self._add_directed(graph, source_port, extra_target, edge_kind="turn")
 
             for port in local_ports:
@@ -256,31 +256,32 @@ class TopologyBuilder:
                 if not other_ports:
                     continue
                 
-                # Se da questo port si può uscire verso l'esterno, deve ricevere traffico interno
-                if port in exit_ports:
-                    internal_in_edges = [s for s, t in graph.in_edges(port) if s in local_ports]
-                    if not internal_in_edges:
-                        p_pos = graph.nodes[port]["pos"]
-                        # Cerca il nodo di ingresso più vicino. Se non ce ne sono, prendi un nodo qualsiasi.
-                        valid_sources = [p for p in entry_ports if p != port] or other_ports
-                        closest_source = min(
-                            valid_sources, 
-                            key=lambda op: math.hypot(graph.nodes[op]["pos"][0] - p_pos[0], graph.nodes[op]["pos"][1] - p_pos[1])
-                        )
-                        self._add_directed(graph, closest_source, port, edge_kind="turn_fix_internal_in")
+                # Calcola quanti archi INTERNI (svolte) ENTRANO in questo port
+                internal_in_edges = [s for s, t in graph.in_edges(port) if s in local_ports]
+                
+                # SE NON ENTRA NESSUN ARCO INTERNO (Il tuo caso specifico: era un nodo di sola uscita interna)
+                if not internal_in_edges:
+                    p_pos = graph.nodes[port]["pos"]
+                    # Trova il port interno dell'incrocio geometricamente più vicino
+                    closest_source = min(
+                        other_ports, 
+                        key=lambda op: math.hypot(graph.nodes[op]["pos"][0] - p_pos[0], graph.nodes[op]["pos"][1] - p_pos[1])
+                    )
+                    # Forza una svolta interna dal port più vicino verso questo port
+                    self._add_directed(graph, closest_source, port, edge_kind="turn_fix_internal_in")
 
-                # Se da questo port si entra dall'esterno, deve smistare traffico verso l'interno
-                if port in entry_ports:
-                    internal_out_edges = [t for s, t in graph.out_edges(port) if t in local_ports]
-                    if not internal_out_edges:
-                        p_pos = graph.nodes[port]["pos"]
-                        # Cerca il nodo di uscita più vicino. Se non ce ne sono, prendi un nodo qualsiasi.
-                        valid_targets = [p for p in exit_ports if p != port] or other_ports
-                        closest_target = min(
-                            valid_targets, 
-                            key=lambda op: math.hypot(graph.nodes[op]["pos"][0] - p_pos[0], graph.nodes[op]["pos"][1] - p_pos[1])
-                        )
-                        self._add_directed(graph, port, closest_target, edge_kind="turn_fix_internal_out")
+                # Calcola quanti archi INTERNI (svolte) ESCONO da questo port
+                internal_out_edges = [t for s, t in graph.out_edges(port) if t in local_ports]
+                
+                # SE NON ESCE NESSUN ARCO INTERNO (Nodo di sola entrata interna)
+                if not internal_out_edges:
+                    p_pos = graph.nodes[port]["pos"]
+                    closest_target = min(
+                        other_ports, 
+                        key=lambda op: math.hypot(graph.nodes[op]["pos"][0] - p_pos[0], graph.nodes[op]["pos"][1] - p_pos[1])
+                    )
+                    # Forza una svolta interna da questo port verso il port più vicino
+                    self._add_directed(graph, port, closest_target, edge_kind="turn_fix_internal_out")
 
     def _check_road_direction(self, graph: nx.DiGraph, node_id: int, intersection_id: int, is_incoming: bool) -> bool:
         edges = graph.in_edges(node_id, data=True) if is_incoming else graph.out_edges(node_id, data=True)
@@ -341,6 +342,12 @@ class TopologyBuilder:
                         })
             # -------------------------------------------------------------
 
+            # Aggiungo questo blocco per inserire i vincoli di fase per i semfaori che si possono accendere conteporaneamente
+            local_phases = {}
+            for n in sorted_nodes:
+                # Assegna a caso o la fase 1 o la fase 2
+                local_phases[f"tl_{n}_dir0"] = self.random_generator.randint(1, 2)
+
             intersections_meta[intersection_id] = {
                 "nodes": sorted_nodes,
                 "is_pass_through": len(neighbors_map[intersection_id]) <= 2,
@@ -349,7 +356,8 @@ class TopologyBuilder:
                 "priority_edge_groups": self._build_random_edge_groups(graph, sorted_nodes),
                 # Storing the new topology fields here
                 "neighbor_traffic_lights": sorted(list(neighbor_traffic_lights)),
-                "external_connections": external_connections
+                "external_connections": external_connections,
+                "phases": local_phases
             }
 
         graph.graph["base_intersection_count"] = self.config.num_nodes
@@ -393,13 +401,16 @@ class TopologyBuilder:
 
         INTERNAL_LENGTH = 15.0  # meters
         INTERNAL_SPEED = INTERNAL_LENGTH / 3.0  # 5.0 meters/tick
+        WEIGHT = INTERNAL_LENGTH  # Default weight for internal edges
+        if edge_kind == "u_turn":
+            WEIGHT = 999999.0  # Very high weight to discourage U-turns unless necessary
 
         p1, p2 = graph.nodes[u]["pos"], graph.nodes[v]["pos"]
         #dist = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
         graph.add_edge(
             u, 
             v, 
-            weight=INTERNAL_LENGTH, 
+            weight=WEIGHT, 
             edge_kind=edge_kind,
             length=INTERNAL_LENGTH,
             max_speed=INTERNAL_SPEED

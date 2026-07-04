@@ -228,7 +228,7 @@ class TopologyBuilder:
             if len(local_neighbors) <= 1:
                 if len(local_neighbors) == 1:
                     port = port_of[(center, local_neighbors[0])]
-                    self._add_directed(graph, port, port, edge_kind="u_turn")
+                    self._add_directed(graph, port, port, edge_kind="u_turn", weight=999999.0)
                 continue
 
             local_ports = [port_of[(center, other)] for other in local_neighbors]

@@ -287,9 +287,9 @@ class TrafficLightAgent(SystemAgent):
                         self._forward_traffic_signal(msg["data"]["num_cars"])
                 case "TRAFFIC_SIGNAL_FORWARD":
                     if msg["data"]["target_tl_id"] == self.unique_id:
-                        print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} COULD receive traffic signal with {msg['data']['num_cars']} cars from {msg['agent_id']}\n")
+                        #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} COULD receive traffic signal with {msg['data']['num_cars']} cars from {msg['agent_id']}\n")
                         wave = IncomingTrafficWave(source_id=msg["agent_id"], num_cars=msg["data"]["num_cars"], expected_arrival_time=msg["data"]["eta"])
-                        print(f"Made a wave from {msg['agent_id']} with {msg['data']['num_cars']} cars and ETA {msg['data']['eta']}\n")
+                        #print(f"Made a wave from {msg['agent_id']} with {msg['data']['num_cars']} cars and ETA {msg['data']['eta']}\n")
                         self.possible_incoming_waves.append(wave)
 
         to_process = list(self.requests.keys())

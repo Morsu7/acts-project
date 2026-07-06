@@ -1,7 +1,7 @@
 from mesa.visualization.ModularVisualization import ModularServer
-from mesa.visualization.UserParam import Slider
-from acts.core.simulation import CityModel
-from acts.agents.vehicle import VehicleAgent
+from mesa.visualization.UserParam import Slider, Choice
+import os
+from acts.core.simulation import UnifiedCityModel
 from acts.visualization.network_module_custom import CustomNetworkModule
 
 from acts.utils.utils_agents import _is_vehicle_agent
@@ -153,6 +153,42 @@ def network_portrayal(G):
         })
 
     return portrayal
+
+def _discover_manual_scenarios():
+    choices = ["Procedurale"]
+    try:
+        import acts.city_model.demo as demo_pkg
+        demo_dir = os.path.dirname(demo_pkg.__file__)
+    
+        
+        if os.path.exists(demo_dir) and os.path.isdir(demo_dir):
+            files = os.listdir(demo_dir)
+            
+            for file in files:
+                if file.endswith(".py") and not file.startswith("__"):
+                    scenario_name = file.replace(".py", "")
+                    choices.append(f"Manuale: {scenario_name}")
+                    
+    return choices
+
 network = CustomNetworkModule(network_portrayal, 600, 600)
-server = ModularServer(CityModel, [network], "ACTS: Distributed Graphs", {"N": Slider("Auto", 5, 1, 20)})
+
+available_scenarios = _discover_manual_scenarios()
+
+model_params = {
+    "config_type": Choice(
+        "Configurazione Mappa",
+        value="Procedurale",
+        choices=available_scenarios
+    ),
+    "num_cars": Slider("Numero di Auto (Solo per Procedurale)", 10, 1, 50),
+    "num_intersections": 16
+}
+
+server = ModularServer(
+    UnifiedCityModel, 
+    [network], 
+    "ACTS: Dynamic Simulator Switcher", 
+    model_params
+)
 server.port = 8521

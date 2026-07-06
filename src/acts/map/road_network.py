@@ -9,7 +9,6 @@ class RoadNetwork:
     """
     Gestisce la struttura fisica del grafo stradale ed espone le operazioni 
     atomiche per la creazione manuale o automatica della topologia.
-    Zero logica randomica interna.
     """
     def __init__(self):
         self.graph = nx.DiGraph()
@@ -64,7 +63,6 @@ class RoadNetwork:
 
     def compile_metadata(self) -> None:
         """
-        Analizza la struttura del grafo in modo puramente DETERMINISTICO.
         Raccoglie le connessioni geografiche ed assegna default fissi se i metadati 
         comportamentali (fasi, priorità) non sono stati impostati manualmente.
         """
@@ -132,15 +130,11 @@ class RoadNetwork:
                             "length": edge_data.get("length", 100.0),
                             "max_speed": edge_data.get("max_speed", 13.89)
                         })
-
-            # --- GESTIONE METADATI COMPORTAMENTALI (SENZA RANDOM) ---
             
-            # 1. Fasi semaforiche: usa il manuale, altrimenti assegna a tutti la fase 1 (default fisso)
             local_phases = self.manual_phases.get(intersection_id)
             if local_phases is None:
                 local_phases = {f"tl_{n}_dir0": 1 for n in sorted_nodes}
 
-            # 2. Gruppi di priorità: usa il manuale, altrimenti raggruppa le manovre in modo deterministico
             edge_groups = self.manual_priority_groups.get(intersection_id)
             if edge_groups is None:
                 edge_groups = self._build_deterministic_edge_groups(sorted_nodes)

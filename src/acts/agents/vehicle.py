@@ -17,9 +17,10 @@ class VehicleAgent(PublishingAgent):
     STATE_QUEUED = "QUEUED"
     STATE_DRIVING = "DRIVING"
 
-    def __init__(self, unique_id, model):
+    def __init__(self, unique_id, model, replan_destination=True):
         super().__init__(unique_id, model, "traffic_channel")
         self.runtime = VehicleRuntimeState(status=self.STATE_QUEUED)
+        self.replan_destination = replan_destination
 
     # Public API: used outside VehicleAgent (visualization, model).
     @property
@@ -101,7 +102,7 @@ class VehicleAgent(PublishingAgent):
             self.runtime.path = []
 
     def _queue_step(self) -> None:
-        if self.runtime.destination == self.pos:
+        if self.runtime.destination == self.pos and self.replan_destination:
             # Already at destination: clear and pick a new one.
             self.runtime.destination = None
             self.runtime.path = []

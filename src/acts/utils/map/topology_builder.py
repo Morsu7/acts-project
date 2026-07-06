@@ -346,7 +346,7 @@ class TopologyBuilder:
             local_phases = {}
             for n in sorted_nodes:
                 # Assegna a caso o la fase 1 o la fase 2
-                local_phases[f"tl_{n}_dir0"] = self.random_generator.randint(1, 2)
+                local_phases[f"tl_{n}_dir0"] = self.random_generator.randint(1, len(sorted_nodes))
 
             intersections_meta[intersection_id] = {
                 "nodes": sorted_nodes,

@@ -168,6 +168,8 @@ def _discover_manual_scenarios():
                 if file.endswith(".py") and not file.startswith("__"):
                     scenario_name = file.replace(".py", "")
                     choices.append(f"Manuale: {scenario_name}")
+    except Exception as e:
+        print(f"Errore durante la scoperta degli scenari manuali: {e}")
                     
     return choices
 

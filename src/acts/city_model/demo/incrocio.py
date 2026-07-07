@@ -40,7 +40,8 @@ def get_config():
 
     # 4. Configurazione dei gruppi di priorità
     # Creiamo un gruppo isolato per ogni semaforo, contenente tutte le sue uscite.
-    # In questo modo il ciclo estrarrà esattamente un solo "dir0" per ogni agente semaforo.    priority_nord  = [[10, 20], [10, 30], [10, 40]]
+    # In questo modo il ciclo estrarrà esattamente un solo "dir0" per ogni agente semaforo.    
+    priority_nord  = [[10, 20], [10, 30], [10, 40]]
     priority_est   = [[20, 10], [20, 30], [20, 40]]
     priority_sud   = [[30, 10], [30, 20], [30, 40]]
     priority_ovest = [[40, 10], [40, 20], [40, 30]]

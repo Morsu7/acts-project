@@ -29,3 +29,9 @@ class UnifiedCityModel(Model):
 
     def step(self):
         self.underlying_model.step()
+
+    def toggle_traffic_light(self, traffic_light_id: str):
+        return self.underlying_model.toggle_traffic_light(traffic_light_id)
+
+    def get_traffic_light_overview(self):
+        return self.underlying_model.get_traffic_light_overview()

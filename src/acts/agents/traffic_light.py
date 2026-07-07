@@ -36,6 +36,10 @@ class TrafficLightAgent(SystemAgent):
     TIME_BETWEEN_SIGNALS = 5 # How often I can tell a neighbour about incoming traffic (In mesa ticks)
     UNCERTAINTY_FACTOR = 0.5 # How much weight to give to incoming traffic when computing the score
     INTERSECTION_CROSSING_TIME = 3 # How long it takes for a car to cross the intersection (In mesa ticks)
+    FAILSAFE_THRESHOLD = 6 # How long to wait before checking for failsafe (In mesa ticks)
+    HEALTH_CHECK_THRESHOLD = 3 # How long before going into failsafe if no replies (In mesa ticks)
+
+    RECOVERY_THRESHOLD = 6 # How long to wait before checking for recovery (In mesa ticks)
 
     def __init__(self, unique_id, model, intersection_id, node_id, controlled_directions, inter_neighbors=None, outgoing_external_neighbors_travel_times=None):
         super().__init__(unique_id, model, f"channel_{intersection_id}")
@@ -60,30 +64,140 @@ class TrafficLightAgent(SystemAgent):
 
         self.possible_incoming_waves: list[IncomingTrafficWave] = []
 
+        # Failsafe mechanism to detect not working traffic lights (deadlock detection)
+        self.neighbor_quiet_time = {}
+        self.failsafe_active = False
+        self.health_check_active = False    # Is the traffic light currently checking the health of its neighbors
+        self.health_check_replies = set()   
+        self.health_check_timer = 0
+
+        # Recovery mechanism during failsafe mode
+        self.last_recovery_request_timer = 0
+
+        self.turned_off = False
+
     # Public API: called by Mesa scheduler.
     def step(self):
+        if self.turned_off:
+            self._update_graph()
+            return
+
         self._detect_queue_size()       # detect presence of waiting cars and update waiting time
         self._receive_messages()        # receive messages from other tl
         self._decide_state()        
 
-        # Each direction independently checks
-        for direction in self.directions:
-            if self._wants_green(direction):
-                match direction.state.runtime.status:
-                    case LightStatus.RED:
-                        if direction.state.time_since_last_request >= self.TIME_BETWEEN_REQUESTS:
-                            self._request_green_light(direction)    # The request is specific to the direction
-                            #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent a request to turn green for direction {direction.direction_id} with score {self._compute_score(direction)}\n")
-                    case LightStatus.GREEN:
-                        if direction.state.time_since_last_signal >= self.TIME_BETWEEN_SIGNALS:
-                            if direction.state.runtime.queue_length > 0:
-                                #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} is sending traffic signal for direction {direction.direction_id} with score {self._compute_score(direction)}\n")
-                                self._send_traffic_signal(direction)  # The signal is specific to the direction
-                            
-            direction.state.add_time_past(1)
+        self._update_failsafe_timers()
 
-        self._update_incoming_waves_ETA()
+        # 3 possible states: 1) normal operation, 2) failsafe active, 3) agent turned off (not working)
+        if self.failsafe_active:
+            self._handle_failsafe_recovery()
+        else:   # normal operation
+            # Each direction independently checks
+            for direction in self.directions:
+                if self._wants_green(direction):
+                    match direction.state.runtime.status:
+                        case LightStatus.RED:
+                            if direction.state.time_since_last_request >= self.TIME_BETWEEN_REQUESTS:
+                                self._request_green_light(direction)    # The request is specific to the direction
+                                #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent a request to turn green for direction {direction.direction_id} with score {self._compute_score(direction)}\n")
+                        case LightStatus.GREEN:
+                            if direction.state.time_since_last_signal >= self.TIME_BETWEEN_SIGNALS:
+                                if direction.state.runtime.queue_length > 0:
+                                    #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} is sending traffic signal for direction {direction.direction_id} with score {self._compute_score(direction)}\n")
+                                    self._send_traffic_signal(direction)  # The signal is specific to the direction
+                                
+                direction.state.add_time_past(1)
+            self._update_incoming_waves_ETA()
+
         self._update_graph()
+
+    def toggle_power(self) -> bool:
+        self.set_power(self.turned_off)
+        return not self.turned_off
+
+    def set_power(self, power_on: bool) -> None:
+        # if i set power_on on a traffic light that is off, i reset its state to RED
+        if power_on and not self.is_working():
+            for direction in self.directions:
+                direction.state.runtime.status = LightStatus.RED
+                direction.state.runtime.status_time = 0
+                direction.state.must_turn_yellow = False
+        self.turned_off = not power_on
+
+    def is_working(self) -> bool:
+        return not self.turned_off
+
+    def get_status_summary(self) -> str:
+        if self.turned_off:
+            return "OFF"
+
+        statuses = []
+        for direction in self.directions:
+            status = direction.state.runtime.status
+            if status not in statuses:
+                statuses.append(status)
+
+        return "/".join(statuses) if statuses else "UNKNOWN"
+
+    def _update_failsafe_timers(self):
+        if self.failsafe_active:
+            return
+        
+        for neighbor in self.neighbor_quiet_time:
+            self.neighbor_quiet_time[neighbor] += 1
+
+        trigger_check = any(t >= self.FAILSAFE_THRESHOLD for t in self.neighbor_quiet_time.values())
+
+        if trigger_check and not self.health_check_active:
+            self.health_check_active = True
+            self.health_check_replies.clear()
+            
+            self._send_event("HEALTH_CHECK", {})   
+            self.health_check_timer = 0
+
+        if self.health_check_active:
+            if len(self.health_check_replies) == self.num_neighbors:
+                self.health_check_active = False
+                self.health_check_timer = 0
+                self.neighbor_quiet_time = {neighbor: 0 for neighbor in self.neighbor_quiet_time}  # Reset quiet time for all neighbors
+                return
+            if self.health_check_timer >= self.HEALTH_CHECK_THRESHOLD:
+                self._activate_failsafe_mode()
+                return
+            self.health_check_timer += 1
+
+    def _activate_failsafe_mode(self):
+        self.failsafe_active = True
+        self.health_check_active = False
+        self.health_check_timer = 0
+        for direction in self.directions:
+            direction.state.runtime.status = LightStatus.FLASHING_YELLOW
+            direction.state.runtime.status_time = 0
+
+        print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} has entered failsafe mode\n")
+
+    def _deactivate_failsafe_mode(self):
+        self.failsafe_active = False
+        self.health_check_active = False
+        self.health_check_timer = 0
+        self.last_recovery_request_timer = 0
+        self.health_check_replies.clear()
+        for direction in self.directions:
+            direction.state.runtime.status = LightStatus.RED
+            direction.state.runtime.status_time = 0
+        print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} has exited failsafe mode\n")
+
+    def _handle_failsafe_recovery(self):
+        if self.last_recovery_request_timer >= self.RECOVERY_THRESHOLD:
+            self._send_event("HEALTH_CHECK", {})
+            self.last_recovery_request_timer = 0
+            self.health_check_replies.clear()
+        
+        self.last_recovery_request_timer += 1
+        print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} is in failsafe mode, waiting for recovery replies ({len(self.health_check_replies)}/{self.num_neighbors}) from sec {self.last_recovery_request_timer}\n")
+        if len(self.health_check_replies) >= self.num_neighbors:
+            self._deactivate_failsafe_mode()
+
 
     def _update_incoming_waves_ETA(self):
         for wave in self.possible_incoming_waves:
@@ -225,6 +339,7 @@ class TrafficLightAgent(SystemAgent):
                         direction.state.runtime.status = LightStatus.GREEN
                         direction.state.runtime.status_time = 0
                         direction.state.permissions = {}  # Reset permissions after turning green
+                        self.deadlock_timer = 0  # Reset deadlock timer after successfully turning green (every agent is currently working)
 
     def _send_allow_green(self, target_tl_id, target_direction_id, request_clock):
         data = {
@@ -241,7 +356,7 @@ class TrafficLightAgent(SystemAgent):
                 "num_cars": direction.state.runtime.queue_length
             }
             self._send_event("TRAFFIC_SIGNAL", data)
-            print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent traffic signal to {id} with {data['num_cars']} cars\n")
+            #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent traffic signal to {id} with {data['num_cars']} cars\n")
         
         direction.state.time_since_last_signal = 0
 
@@ -253,7 +368,7 @@ class TrafficLightAgent(SystemAgent):
                 "num_cars": incoming_score
             }
             self._send_event("TRAFFIC_SIGNAL_FORWARD", data, broadcast=True)
-            print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} forwarded traffic signal to {id} with {incoming_score} cars\n")
+            #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} forwarded traffic signal to {id} with {incoming_score} cars\n")
 
     # When receiving a green permission, store it if not outdated
     def _store_permission(self, message):
@@ -264,53 +379,86 @@ class TrafficLightAgent(SystemAgent):
                     return  # Ignore outdated permission messages
                 direction.state.permissions[message["agent_id"]] = True
 
+    def _store_alive_signal(self, message):
+        message_data = message["data"]
+        if message_data["target_tl_id"] == self.unique_id:
+            self.health_check_replies.add(message["agent_id"])
+
     def _receive_messages(self):
         # filter per message type and update the requests dictionary
         messages = [*self.get_messages(), *self.get_broadcast_messages()]
 
         for msg in messages:
             self.lamport_clock = max(self.lamport_clock, msg["clock"]) + 1
+
+            # We keep track of still working neighbors
+            sender_id = msg["agent_id"]
+            if sender_id != self.unique_id:
+                self.neighbor_quiet_time[sender_id] = 0
+
             match msg['event']:
-                case "ALLOW_GREEN":
+                # --- Universal Failsafe Protocol (Always Active) ---
+                case "HEALTH_CHECK":
+                    if msg['agent_id'] != self.unique_id:
+                        self._send_alive_signal(msg["agent_id"])
+
+                case "ALIVE_SIGNAL":
+                    self._store_alive_signal(msg)
+
+                # --- Operational Traffic Protocol (Ignored during Failsafe) ---
+                case "ALLOW_GREEN" if not self.failsafe_active:
                     if msg["data"]["target_tl_id"] == self.unique_id:
                         self._store_permission(msg)
-                case "REQUEST_GREEN":
+
+                case "REQUEST_GREEN" if not self.failsafe_active:
                     requester_id = msg["agent_id"]
-                    if requester_id == self.unique_id:
-                        continue  # Ignore requests from self
-                    requester_direction_id = msg["data"]["direction_id"]
-                    requester_score = msg["data"]["queue_score"]
-                    request_clock = msg["clock"]
-                    self._store_request(requester_id, requester_direction_id, requester_score, request_clock)
-                case "TRAFFIC_SIGNAL":
+                    if requester_id != self.unique_id:  # Using a direct conditional instead of 'continue'
+                        self._store_request(
+                            requester_id=requester_id,
+                            requester_direction_id=msg["data"]["direction_id"],
+                            requester_score=msg["data"]["queue_score"],
+                            request_clock=msg["clock"]
+                        )
+
+                case "TRAFFIC_SIGNAL" if not self.failsafe_active:
                     if msg["data"]["target_tl_id"] == self.unique_id:
                         self._forward_traffic_signal(msg["data"]["num_cars"])
-                case "TRAFFIC_SIGNAL_FORWARD":
+
+                case "TRAFFIC_SIGNAL_FORWARD" if not self.failsafe_active:
                     if msg["data"]["target_tl_id"] == self.unique_id:
-                        #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} COULD receive traffic signal with {msg['data']['num_cars']} cars from {msg['agent_id']}\n")
-                        wave = IncomingTrafficWave(source_id=msg["agent_id"], num_cars=msg["data"]["num_cars"], expected_arrival_time=msg["data"]["eta"])
-                        #print(f"Made a wave from {msg['agent_id']} with {msg['data']['num_cars']} cars and ETA {msg['data']['eta']}\n")
+                        wave = IncomingTrafficWave(
+                            source_id=msg["agent_id"], 
+                            num_cars=msg["data"]["num_cars"], 
+                            expected_arrival_time=msg["data"]["eta"]
+                        )
                         self.possible_incoming_waves.append(wave)
 
-        to_process = list(self.requests.keys())
-        for id in to_process:
-            request = self.requests[id]
-            # TODO: each direction independently checks if it can give permission to the requester
-            if self._can_give_permission(request):
-                if self._are_all_directions_red():
-                    self._send_allow_green(request.requester_id, request.requester_direction_id, request.request_clock)
-                    self.requests.pop(id)  # Remove the request after granting permission
+        if not self.failsafe_active:
+            to_process = list(self.requests.keys())
+            for id in to_process:
+                request = self.requests[id]
+                # TODO: each direction independently checks if it can give permission to the requester
+                if self._can_give_permission(request):
+                    if self._are_all_directions_red():
+                        self._send_allow_green(request.requester_id, request.requester_direction_id, request.request_clock)
+                        self.requests.pop(id)  # Remove the request after granting permission
+                    else:
+                        for direction in self.directions:
+                            if direction.state.runtime.status == LightStatus.GREEN:
+                                direction.state.must_turn_yellow = True  # Set the flag to turn yellow before granting permission
                 else:
-                    for direction in self.directions:
-                        if direction.state.runtime.status == LightStatus.GREEN:
-                            direction.state.must_turn_yellow = True  # Set the flag to turn yellow before granting permission
-            else:
-                self.requests.pop(id)  # Remove the request if it cannot be granted
+                    self.requests.pop(id)  # Remove the request if it cannot be granted
         
         #self.requests.clear()  # Clear requests after processing
 
     def _are_all_directions_red(self) -> bool:
         return all(direction.state.runtime.status == LightStatus.RED for direction in self.directions)
+
+    def _send_alive_signal(self, target_id: str):
+        data = {
+            "target_tl_id": target_id
+        }
+        self._send_event("ALIVE_SIGNAL", data)
             
     def _can_give_permission(self, request: Request) -> bool:
         phases = self.model.intersection_meta[self.intersection_id].get("phases", {})
@@ -351,4 +499,5 @@ class TrafficLightAgent(SystemAgent):
                     edge_data["tl_priority_score"] = self._compute_score(direction)
                     edge_data["tl_waiting_cars"] = direction.state.runtime.queue_length
                     edge_data["tl_waiting_seconds"] = direction.state.runtime.waiting_time
-                    edge_data["tl_state"] = direction.state.runtime.status
+                    edge_data["tl_state"] = "OFF" if self.turned_off else direction.state.runtime.status
+                    edge_data['tl_state_time'] = direction.state.runtime.status_time

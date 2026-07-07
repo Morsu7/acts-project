@@ -6,6 +6,7 @@ class LightStatus:
     RED = "RED"
     GREEN = "GREEN"
     YELLOW = "YELLOW"
+    FLASHING_YELLOW = "FLASHING_YELLOW"
 
     def __str__(self):
         return self.value

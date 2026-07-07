@@ -39,5 +39,8 @@ else
   echo "requirements.txt not found. Skipping dependency installation."
 fi
 
+echo "Running tests..."
+pytest
+
 echo "Starting ACTS..."
 python3 -m acts

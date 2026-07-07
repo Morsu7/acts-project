@@ -329,9 +329,20 @@ class TrafficLightAgent(SystemAgent):
                 case LightStatus.YELLOW:
                     return False            # wait for yellow to finish
 
-            # deny if we have more traffic waiting
-            if self._compute_score(direction) > request.requester_score:
+            my_score = self._compute_score(direction)
+            
+            if my_score > request.requester_score:
                 return False
+                
+            # Tie-breaking
+            if my_score == request.requester_score:
+                if direction.state.request_clock < request.request_clock:
+                    return False
+                
+                if direction.state.request_clock == request.request_clock:
+                    # Confronto alfabetico degli ID (es. "tl_1" vince contro "tl_2")
+                    if self.unique_id < request.requester_id:
+                        return False
                 
         return True
 

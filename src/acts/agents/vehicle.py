@@ -17,10 +17,12 @@ class VehicleAgent(PublishingAgent):
     STATE_QUEUED = "QUEUED"
     STATE_DRIVING = "DRIVING"
 
-    def __init__(self, unique_id, model, replan_destination=True):
+    def __init__(self, unique_id, model, start_path: list[int] = [], replan_destination=True):
         super().__init__(unique_id, model, "traffic_channel")
         self.runtime = VehicleRuntimeState(status=self.STATE_QUEUED)
         self.replan_destination = replan_destination
+        self.runtime.path = start_path
+        self.runtime.destination = self.runtime.path[-1] if len(self.runtime.path) > 0 else None
 
     # Public API: used outside VehicleAgent (visualization, model).
     @property
@@ -136,6 +138,7 @@ class VehicleAgent(PublishingAgent):
         max_speed = edge_data.get("max_speed", 5.0)
         
         effective_timer = max(1, round(length / max_speed))
+        print(f"Vehicle {self.unique_id} moving from {self.pos} to {next_node} with length {length}m and max speed {max_speed}m/tick, travel timer set to {effective_timer} ticks.")
         
         self.runtime.travel_timer = effective_timer
         self.runtime.edge_total_timer = self.runtime.travel_timer

@@ -29,27 +29,32 @@ class RoadNetwork:
             attrs["is_pass_through"] = True
         self.graph.add_node(port_id, **attrs)
 
-    def add_road_edge(self, u_port: int, v_port: int, length: float, max_speed: float, tier: str) -> None:
+    def add_road_edge(self, u_port: int, v_port: int, tier: str = "local") -> None:
         """Azione Atomica: Collega due port appartenenti a incroci diversi (Strada Esterna)."""
+        geo_length = self._get_geo_length(u_port, v_port)
+        match tier:
+            case "arterial": road_speed = 14.0 # m/s (50 km/h)
+            case "local" | _: road_speed = 8.0 # m/s (30 km/h)
         self.graph.add_edge(
             u_port, v_port,
-            weight=length,
-            length=length,
-            max_speed=max_speed,
+            weight=geo_length,
+            length=geo_length,
+            max_speed=road_speed,
             edge_kind="road",
             tier=tier
         )
 
-    def add_turn_edge(self, u_port: int, v_port: int, edge_kind: str, length: float = 15.0, max_speed: float = 5.0) -> None:
+    def add_turn_edge(self, u_port: int, v_port: int, edge_kind: str, max_speed: float = 5.0) -> None:
         """Azione Atomica: Collega due port interni allo stesso incrocio (Svolta o Inversione)."""
         if self.graph.has_edge(u_port, v_port):
             return
-        weight = 999999.0 if edge_kind == "u_turn" else length
+        geo_length = self._get_geo_length(u_port, v_port)
+        weight = 999999.0 if edge_kind == "u_turn" else geo_length
         self.graph.add_edge(
             u_port, v_port,
             weight=weight,
             edge_kind=edge_kind,
-            length=length,
+            length=geo_length,
             max_speed=max_speed
         )
 
@@ -162,3 +167,9 @@ class RoadNetwork:
                 # Ogni singola manovra da sorgente a destinazione fa gruppo a sé
                 groups.append([[source_node, target_node]])
         return groups
+
+    def _get_geo_length(self, u_port: int, v_port: int) -> float:
+        """Calcola la distanza geografica tra due port (in metri)."""
+        pos_u = self.graph.nodes[u_port].get("pos", (0.0, 0.0))
+        pos_v = self.graph.nodes[v_port].get("pos", (0.0, 0.0))
+        return math.hypot(pos_u[0] - pos_v[0], pos_u[1] - pos_v[1])

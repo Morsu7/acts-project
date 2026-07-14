@@ -11,12 +11,15 @@ class TopologyConfig:
     diagonal_road_probability: float = 0.45
     bidirectional_probability: float = 0.45
     extra_turn_probability: float = 0.45
-    # Distance of lane ports from the intersection center (normalized [0, 1] coordinates).
-    port_offset: float = 0.09
     # How many random topology generations to try before accepting the last one.
     max_connectivity_attempts: int = 50
     # Extra rounds used when reconnecting weakly connected areas.
     reconnect_round_multiplier: int = 2
+
+    # The size of each block in meters (used for calculating the length of edges).
+    block_size_meters: float = 100.0
+    # Distance of lane ports from the intersection center in meters
+    port_offset: float = 20
 
     @property
     def cols(self) -> int:

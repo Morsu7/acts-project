@@ -3,6 +3,7 @@ from mesa.visualization.UserParam import Slider, Choice
 import os
 from acts.core.simulation import UnifiedCityModel
 from acts.visualization.network_module_custom import CustomNetworkModule
+from acts.visualization.control_window import TrafficLightControlHandler
 
 from acts.utils.utils_agents import _is_vehicle_agent
 
@@ -85,6 +86,12 @@ def network_portrayal(G):
                     edge_color = '#FFC000'
                 case "RED":
                     edge_color = '#D7263D'
+                case 'FLASHING_YELLOW':
+                    if edge_data.get("tl_state_time", 0) % 2 == 0:
+                        edge_color = '#FFC000'
+                    else:
+                        edge_color = '#000000'
+
             waiting_cars = int(edge_data.get("tl_waiting_cars", 0))
             waiting_seconds = int(edge_data.get("tl_waiting_seconds", 0))
             waiting_cars_score = float(edge_data.get("tl_waiting_cars_score", 0.0))
@@ -194,3 +201,10 @@ server = ModularServer(
     model_params
 )
 server.port = 8521
+server.add_handlers(
+    r".*$",
+    [
+        (r"/traffic-lights", TrafficLightControlHandler),
+        (r"/traffic-lights/", TrafficLightControlHandler),
+    ],
+)

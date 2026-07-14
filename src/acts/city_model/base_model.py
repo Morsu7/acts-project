@@ -14,6 +14,8 @@ class CityModel(Model):
         self.grid = NetworkGrid(self.G)
         self.schedule = RandomActivation(self)
         self.running = True
+        self.traffic_lights_by_id: dict[str, TrafficLightAgent] = {}
+        self.traffic_lights_by_intersection: dict[int, list[TrafficLightAgent]] = {}
         
         self.intersection_meta = self.G.graph.get("intersections", {})
         self.intersection_nodes = {
@@ -77,6 +79,8 @@ class CityModel(Model):
                 self.schedule.add(tl)
                 self.grid.place_agent(tl, node)     
                 self.G.nodes[node]["traffic_light_id"] = tl.unique_id
+                self.traffic_lights_by_id[tl.unique_id] = tl
+                self.traffic_lights_by_intersection.setdefault(intersection_id, []).append(tl)
 
                 # Associazione dell'ID del gruppo semaforico agli archi del grafo
                 for group_idx, group in enumerate(structured_edge_groups):
@@ -86,3 +90,35 @@ class CityModel(Model):
 
     def step(self):
         self.schedule.step()
+
+    def toggle_traffic_light(self, traffic_light_id: str) -> bool | None:
+        traffic_light = self.traffic_lights_by_id.get(traffic_light_id)
+        if traffic_light is None:
+            return None
+
+        return traffic_light.toggle_power()
+
+    def get_traffic_light_overview(self) -> list[dict]:
+        overview = []
+
+        for intersection_id in sorted(self.intersection_nodes):
+            traffic_lights = sorted(
+                self.traffic_lights_by_intersection.get(intersection_id, []),
+                key=lambda agent: agent.node_id,
+            )
+            overview.append(
+                {
+                    "intersection_id": intersection_id,
+                    "traffic_lights": [
+                        {
+                            "traffic_light_id": traffic_light.unique_id,
+                            "node_id": traffic_light.node_id,
+                            "working": traffic_light.is_working(),
+                            "status_summary": traffic_light.get_status_summary(),
+                        }
+                        for traffic_light in traffic_lights
+                    ],
+                }
+            )
+
+        return overview

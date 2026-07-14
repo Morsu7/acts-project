@@ -70,11 +70,14 @@ class TopologyBuilder:
         positions: dict[int, tuple[float, float]] = {}
         cols, rows = self.config.cols, self.config.rows
 
+        block_size = self.config.block_size_meters
+
         for node_id in range(self.config.num_nodes):
             row = node_id // cols
             col = node_id % cols
-            x = col / (cols - 1) if cols > 1 else 0.5
-            y = row / (rows - 1) if rows > 1 else 0.5
+            # geographical coordinates 
+            x = col * block_size
+            y = row * block_size
             positions[node_id] = (x, y)
 
         return positions
@@ -218,8 +221,9 @@ class TopologyBuilder:
         norm = math.hypot(dx, dy)
         
         ux, uy = (dx / norm, dy / norm) if norm > 0 else (0.0, 0.0)
-        px = max(0.0, min(1.0, cx + ux * self.config.port_offset))
-        py = max(0.0, min(1.0, cy + uy * self.config.port_offset))
+
+        px = cx + ux * self.config.port_offset
+        py = cy + uy * self.config.port_offset
         return px, py
 
     def _connect_roads(self, base_edges: list[tuple[int, int]], port_of: dict[tuple[int, int], int]) -> None:
@@ -228,18 +232,8 @@ class TopologyBuilder:
             v_port = port_of.get((v, u))
             
             if u_port is not None and v_port is not None:
-                p1, p2 = self.network.graph.nodes[u_port]["pos"], self.network.graph.nodes[v_port]["pos"]
-                
-                map_scale_meters = getattr(self.config, "map_scale_meters", 500.0)
-                geo_length = math.hypot(p1[0] - p2[0], p1[1] - p2[1]) * map_scale_meters
-                
-                road_tier = self.random_generator.choice(["local", "arterial", "highway"])
-                match road_tier:
-                    case "highway": road_speed = 25.0
-                    case "arterial": road_speed = 14.0
-                    case "local" | _: road_speed = 8.0
-                
-                self.network.add_road_edge(u_port, v_port, length=geo_length, max_speed=road_speed, tier=road_tier)
+                road_tier = self.random_generator.choices(["local", "arterial"])
+                self.network.add_road_edge(u_port, v_port, tier=road_tier)
 
     def _connect_internal_turns(self, neighbors_map: dict[int, list[int]], port_of: dict[tuple[int, int], int]) -> None:
         for center in range(self.config.num_nodes):

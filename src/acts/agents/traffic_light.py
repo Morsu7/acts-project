@@ -30,8 +30,6 @@ class IncomingTrafficWave:
 class TrafficLightAgent(SystemAgent):
 
     # PARAMETERS (TODO: make them configurable and move them to a config file)
-    MIN_GREEN_TIME = 5
-    YELLOW_TIME = 2
     TIME_BETWEEN_REQUESTS = 3 # How often I can ask for green (In mesa ticks)
     TIME_BETWEEN_SIGNALS = 5 # How often I can tell a neighbour about incoming traffic (In mesa ticks)
     UNCERTAINTY_FACTOR = 0.5 # How much weight to give to incoming traffic when computing the score
@@ -40,6 +38,9 @@ class TrafficLightAgent(SystemAgent):
     HEALTH_CHECK_THRESHOLD = 3 # How long before going into failsafe if no replies (In mesa ticks)
 
     RECOVERY_THRESHOLD = 6 # How long to wait before checking for recovery (In mesa ticks)
+
+    MIN_GREEN_TIME = 5
+    YELLOW_TIME = INTERSECTION_CROSSING_TIME
 
     def __init__(self, unique_id, model, intersection_id, node_id, controlled_directions, inter_neighbors=None, outgoing_external_neighbors_travel_times=None):
         super().__init__(unique_id, model, f"channel_{intersection_id}")

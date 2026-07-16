@@ -202,6 +202,7 @@ def test_state_machine_forces_yellow_phase(basic_traffic_light):
     assert direction.state.runtime.status_time == 0
     tl._decide_state()
     assert direction.state.runtime.status == LightStatus.YELLOW
+    direction.state.runtime.status_time = tl.YELLOW_TIME
     tl._decide_state()
     assert direction.state.runtime.status == LightStatus.RED
 

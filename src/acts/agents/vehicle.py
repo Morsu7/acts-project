@@ -140,6 +140,10 @@ class VehicleAgent(PublishingAgent):
             self._plan_route()
             return
 
+        # Only one vehicle can leave this node per tick
+        if not self.model.try_reserve_node_departure(self.pos):
+            return
+
         edge_data = self.model.G.get_edge_data(self.pos, next_node) or {}
         edge_state = edge_data.get("tl_state")
         if edge_state is not None and str(edge_state).upper() != "GREEN":

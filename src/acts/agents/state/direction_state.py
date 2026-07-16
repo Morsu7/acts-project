@@ -17,6 +17,7 @@ class DirectionState:   # Each independent group of edges controlled by a traffi
     request_clock: int = 0                              # Lamport clock value when the last request was sent
     must_turn_yellow: bool = False                      # Flag to indicate if the light must turn yellow (before giving permission to another traffic light)
     score: float = 0.0                                  # Score for the direction, used for tie-breaking in requests
+    green_cooldown: int = 0                             # Counter to track cooldown time after turning yellow before requesting green again
 
     def add_time_past(self, time: int):
         self.time_since_last_request += time

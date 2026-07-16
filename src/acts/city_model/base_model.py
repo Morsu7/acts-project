@@ -16,6 +16,8 @@ class CityModel(Model):
         self.running = True
         self.traffic_lights_by_id: dict[str, TrafficLightAgent] = {}
         self.traffic_lights_by_intersection: dict[int, list[TrafficLightAgent]] = {}
+
+        self.node_departure_locks: set[int] = set()
         
         self.intersection_meta = self.G.graph.get("intersections", {})
         self.intersection_nodes = {
@@ -89,7 +91,20 @@ class CityModel(Model):
                             self.G[edge[0]][edge[1]]["tl_group_id"] = f"{node}_group{group_idx}"
 
     def step(self):
+        self.node_departure_locks.clear()
         self.schedule.step()
+
+    def try_reserve_node_departure(self, node_id: int) -> bool:
+        """
+        Allows only one vehicle to leave a node during the current tick.
+        Returns True if the vehicle can depart.
+        """
+
+        if node_id in self.node_departure_locks:
+            return False
+
+        self.node_departure_locks.add(node_id)
+        return True
 
     def toggle_traffic_light(self, traffic_light_id: str) -> bool | None:
         traffic_light = self.traffic_lights_by_id.get(traffic_light_id)

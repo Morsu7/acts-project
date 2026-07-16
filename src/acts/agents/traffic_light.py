@@ -39,8 +39,11 @@ class TrafficLightAgent(SystemAgent):
 
     RECOVERY_THRESHOLD = 6 # How long to wait before checking for recovery (In mesa ticks)
 
-    MIN_GREEN_TIME = 5
     YELLOW_TIME = INTERSECTION_CROSSING_TIME
+
+    MIN_GREEN_TIME = 5
+    MAX_GREEN_TIME = 30 # After this time, i need to concede green permission even when asked even if my score is higher
+    GREEN_COOLDOWN_TIME = YELLOW_TIME + 5 # After turning yellow, i must wait at least this time before asking to turn green again
 
     def __init__(self, unique_id, model, intersection_id, node_id, controlled_directions, inter_neighbors=None, outgoing_external_neighbors_travel_times=None):
         super().__init__(unique_id, model, f"channel_{intersection_id}")
@@ -88,6 +91,7 @@ class TrafficLightAgent(SystemAgent):
         self._decide_state()        
 
         self._update_failsafe_timers()
+        self._update_cooldown_timers()
 
         # 3 possible states: 1) normal operation, 2) failsafe active, 3) agent turned off (not working)
         if self.failsafe_active:
@@ -167,6 +171,11 @@ class TrafficLightAgent(SystemAgent):
                 return
             self.health_check_timer += 1
 
+    def _update_cooldown_timers(self):
+        for direction in self.directions:
+            if direction.state.green_cooldown > 0:
+                direction.state.green_cooldown -= 1
+
     def _activate_failsafe_mode(self):
         self.failsafe_active = True
         self.health_check_active = False
@@ -195,7 +204,7 @@ class TrafficLightAgent(SystemAgent):
             self.health_check_replies.clear()
         
         self.last_recovery_request_timer += 1
-        print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} is in failsafe mode, waiting for recovery replies ({len(self.health_check_replies)}/{self.num_neighbors}) from sec {self.last_recovery_request_timer}\n")
+        #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} is in failsafe mode, waiting for recovery replies ({len(self.health_check_replies)}/{self.num_neighbors}) from sec {self.last_recovery_request_timer}\n")
         if len(self.health_check_replies) >= self.num_neighbors:
             self._deactivate_failsafe_mode()
 
@@ -304,14 +313,26 @@ class TrafficLightAgent(SystemAgent):
                 direction_state.waiting_time = 0
 
     def _wants_green(self, direction: ControlledDirection) -> bool:
+        if direction.state.green_cooldown > 0: return False
         return 0 < self._compute_score(direction) < float('inf')
 
-    def _compute_score(self, direction: ControlledDirection = None) -> float:
-        own_score = direction.state.runtime.queue_length * (direction.state.runtime.waiting_time + 1)     # +1 to avoid zero score
+    def _compute_score(self, direction):
 
-        score = own_score + sum(wave.num_cars / (1 + (wave.expected_arrival_time / 10)) for wave in self.possible_incoming_waves) * self.UNCERTAINTY_FACTOR
-        
-        return score
+        queue = direction.state.runtime.queue_length
+        wait = direction.state.runtime.waiting_time
+
+        own_score = (
+            queue * 5 +
+            wait
+        )
+
+        incoming = sum(
+            wave.num_cars /
+            (1 + wave.expected_arrival_time / 10)
+            for wave in self.possible_incoming_waves
+        )
+
+        return own_score + incoming * self.UNCERTAINTY_FACTOR
 
     def _request_green_light(self, direction: ControlledDirection):
         # Send a request to the intersection controller (or other traffic lights) to turn green
@@ -337,6 +358,7 @@ class TrafficLightAgent(SystemAgent):
                     if direction.state.runtime.status_time >= self.YELLOW_TIME:
                         direction.state.runtime.status = LightStatus.RED
                         direction.state.runtime.status_time = 0
+                        direction.state.green_cooldown = self.GREEN_COOLDOWN_TIME
                 case LightStatus.GREEN:
                     if direction.state.must_turn_yellow and direction.state.runtime.status_time >= self.MIN_GREEN_TIME:
                         direction.state.runtime.status = LightStatus.YELLOW
@@ -347,6 +369,7 @@ class TrafficLightAgent(SystemAgent):
                         #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} has received all permissions to turn green for direction {direction.direction_id}\n")
                         direction.state.runtime.status = LightStatus.GREEN
                         direction.state.runtime.status_time = 0
+
                         direction.state.permissions = {}  # Reset permissions after turning green
                         direction.state.score = 0.0  # Reset score after turning green
                         self.deadlock_timer = 0  # Reset deadlock timer after successfully turning green (every agent is currently working)
@@ -358,6 +381,7 @@ class TrafficLightAgent(SystemAgent):
             "request_clock": request_clock
         }
         self._send_event("ALLOW_GREEN", data)
+        #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent ALLOW_GREEN to {target_tl_id} for direction {target_direction_id} with request clock {request_clock}\n")
 
     def _send_traffic_signal(self, direction: ControlledDirection):
         for id in direction.destinations_ids:
@@ -491,17 +515,29 @@ class TrafficLightAgent(SystemAgent):
             if my_phase is not None and my_phase == requester_phase:
                 continue
 
+            # concede green permission if i reached the maximum green time, even if my score is higher
+            if direction.state.runtime.status == LightStatus.GREEN and direction.state.runtime.status_time >= self.MAX_GREEN_TIME:
+                continue
+
+            # concede green if i am currently in green cooldown, even if my score is higher
+            if direction.state.green_cooldown > 0:
+                continue
+
             match direction.state.runtime.status:
                 case LightStatus.GREEN if direction.state.runtime.status_time < self.MIN_GREEN_TIME:
                     return False            # enforce minimum green time
                 case LightStatus.YELLOW:
                     return False            # wait for yellow to finish
 
+            if direction.state.runtime.status == LightStatus.GREEN:
+                direction.state.score = self._compute_score(direction)
+                # During a green light, constantly update my score
+
             my_score = direction.state.score
             
             if my_score > request.requester_score:
                 return False
-                
+
             # Tie-breaking
             if abs(my_score - request.requester_score) <= 1e-9:
                 if direction.state.request_clock < request.request_clock:

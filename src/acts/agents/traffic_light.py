@@ -247,8 +247,8 @@ class TrafficLightAgent(SystemAgent):
         node_agents = self.model.grid.get_cell_list_contents([self.node_id])
         queued_vehicles = [a for a in node_agents if _is_vehicle_agent(a) and a.state == "QUEUED"]
 
-        # Define how close a driving car must be (in simulation ticks) to be counted
-        NEAR_TRAFFIC_LIGHT_THRESHOLD = 5 
+        # Define how close a driving car must be (in meters) to be counted
+        NEAR_TRAFFIC_LIGHT_THRESHOLD = 30 
 
         for direction in self.directions:
             direction_state = direction.state.runtime
@@ -278,7 +278,7 @@ class TrafficLightAgent(SystemAgent):
                 driving_vehicles_on_edge = edge_data.get("vehicles", [])
 
                 for v in driving_vehicles_on_edge:
-                    if v.state == "DRIVING" and v.travel_timer <= NEAR_TRAFFIC_LIGHT_THRESHOLD:
+                    if v.state == "DRIVING" and v.distance_to_node_meters <= NEAR_TRAFFIC_LIGHT_THRESHOLD:
                         if v.path and len(v.path) > 2:
                             #print(f"car path: {v.path}\n")
                             # path[1] is this light. path[2] is their downstream turn.
@@ -286,7 +286,11 @@ class TrafficLightAgent(SystemAgent):
                             
                             # Check if that future turn aligns with this direction grouping
                             if downstream_node_intent in outgoing_lanes:
-                                count += 1
+                                proximity_factor = (
+                                    NEAR_TRAFFIC_LIGHT_THRESHOLD - v.distance_to_node_meters
+                                ) / NEAR_TRAFFIC_LIGHT_THRESHOLD
+
+                                count += proximity_factor
                         else:
                             # Fallback if the traffic light itself is their absolute destination
                             count += 1
@@ -312,11 +316,15 @@ class TrafficLightAgent(SystemAgent):
     def _request_green_light(self, direction: ControlledDirection):
         # Send a request to the intersection controller (or other traffic lights) to turn green
         #direction.state.permissions = {}  # Reset received permissions for this step
-        direction.state.request_clock = self.lamport_clock  # Store the Lamport clock value when the request is sent
+        if not direction.state.permissions:
+            direction.state.request_clock = self.lamport_clock  # Store the Lamport clock value when the request is sent
+
+        direction.state.score = self._compute_score(direction)
         direction.state.time_since_last_request = 0  # Reset the counter after sending a request
         data = {
             "direction_id": direction.direction_id,
-            "queue_score": self._compute_score(direction)
+            "queue_score": direction.state.score,
+            "request_clock": direction.state.request_clock
         }
         self._send_event("REQUEST_GREEN", data)
 
@@ -330,7 +338,7 @@ class TrafficLightAgent(SystemAgent):
                         direction.state.runtime.status = LightStatus.RED
                         direction.state.runtime.status_time = 0
                 case LightStatus.GREEN:
-                    if direction.state.must_turn_yellow:
+                    if direction.state.must_turn_yellow and direction.state.runtime.status_time >= self.MIN_GREEN_TIME:
                         direction.state.runtime.status = LightStatus.YELLOW
                         direction.state.must_turn_yellow = False
                         direction.state.runtime.status_time = 0
@@ -340,6 +348,7 @@ class TrafficLightAgent(SystemAgent):
                         direction.state.runtime.status = LightStatus.GREEN
                         direction.state.runtime.status_time = 0
                         direction.state.permissions = {}  # Reset permissions after turning green
+                        direction.state.score = 0.0  # Reset score after turning green
                         self.deadlock_timer = 0  # Reset deadlock timer after successfully turning green (every agent is currently working)
 
     def _send_allow_green(self, target_tl_id, target_direction_id, request_clock):
@@ -388,6 +397,7 @@ class TrafficLightAgent(SystemAgent):
     def _receive_messages(self):
         # filter per message type and update the requests dictionary
         messages = [*self.get_messages(), *self.get_broadcast_messages()]
+        messages.sort(key=lambda m: (m["clock"], m["agent_id"]))
 
         for msg in messages:
             self.lamport_clock = max(self.lamport_clock, msg["clock"]) + 1
@@ -418,7 +428,7 @@ class TrafficLightAgent(SystemAgent):
                             requester_id=requester_id,
                             requester_direction_id=msg["data"]["direction_id"],
                             requester_score=msg["data"]["queue_score"],
-                            request_clock=msg["clock"]
+                            request_clock=msg["data"]["request_clock"]
                         )
 
                 case "TRAFFIC_SIGNAL" if not self.failsafe_active:
@@ -442,6 +452,15 @@ class TrafficLightAgent(SystemAgent):
                 if self._can_give_permission(request):
                     if self._are_all_directions_red():
                         self._send_allow_green(request.requester_id, request.requester_direction_id, request.request_clock)
+                        # TODO: fix check
+                        for direction in self.directions:
+                            if direction.state.permissions.get(request.requester_id):
+                                phases = self.model.intersection_meta[self.intersection_id].get("phases", {})
+                                my_phase = phases.get(direction.direction_id)
+                                requester_phase = phases.get(request.requester_direction_id)
+                                if my_phase is None or my_phase != requester_phase:
+                                    direction.state.permissions.pop(request.requester_id)  # Remove the permission after granting it
+
                         self.requests.pop(id)  # Remove the request after granting permission
                     else:
                         for direction in self.directions:
@@ -478,13 +497,13 @@ class TrafficLightAgent(SystemAgent):
                 case LightStatus.YELLOW:
                     return False            # wait for yellow to finish
 
-            my_score = self._compute_score(direction)
+            my_score = direction.state.score
             
             if my_score > request.requester_score:
                 return False
                 
             # Tie-breaking
-            if my_score == request.requester_score:
+            if abs(my_score - request.requester_score) <= 1e-9:
                 if direction.state.request_clock < request.request_clock:
                     return False
                 
@@ -499,7 +518,7 @@ class TrafficLightAgent(SystemAgent):
         existing = self.requests.get(requester_direction_id)
 
         # keep only most recent request per requester
-        if existing is None or request_clock > existing.request_clock:
+        if existing is None or request_clock >= existing.request_clock:
             self.requests[requester_direction_id] = Request(requester_id, requester_direction_id, requester_score, request_clock)
 
     def _update_graph(self):

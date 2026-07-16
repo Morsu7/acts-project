@@ -1,6 +1,6 @@
 from mesa import Model
 from mesa.space import NetworkGrid
-from mesa.time import RandomActivation
+from mesa.time import BaseScheduler
 
 import networkx as nx
 
@@ -12,7 +12,7 @@ class CityModel(Model):
         super().__init__()
         self.G = graph
         self.grid = NetworkGrid(self.G)
-        self.schedule = RandomActivation(self)
+        self.schedule = BaseScheduler(self)
         self.running = True
         self.traffic_lights_by_id: dict[str, TrafficLightAgent] = {}
         self.traffic_lights_by_intersection: dict[int, list[TrafficLightAgent]] = {}

@@ -3,7 +3,8 @@ from mesa.visualization.UserParam import Slider, Choice
 import os
 from acts.core.simulation import UnifiedCityModel
 from acts.visualization.network_module_custom import CustomNetworkModule
-from acts.visualization.control_window import TrafficLightControlHandler
+
+from acts.visualization.control_window import TrafficLightResourceHandler
 
 from acts.utils.utils_agents import _is_vehicle_agent
 
@@ -204,7 +205,9 @@ server.port = 8521
 server.add_handlers(
     r".*$",
     [
-        (r"/traffic-lights", TrafficLightControlHandler),
-        (r"/traffic-lights/", TrafficLightControlHandler),
+        # Handles /traffic-lights and /traffic-lights/
+        (r"/traffic-lights/?", TrafficLightResourceHandler),
+        # Handles /static/style.css, passing 'style.css' to the 'path' argument in get()
+        (r"/static/(.*)", TrafficLightResourceHandler),
     ],
 )

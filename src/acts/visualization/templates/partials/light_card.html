@@ -1,0 +1,17 @@
+{% set working = bool(light["working"]) %}
+<div class="light-card">
+    <div class="light-header">
+        <div>
+            <div class="light-title">{{ escape(str(light['traffic_light_id'])) }}</div>
+            <div class="light-meta">Node {{ escape(str(light['node_id'])) }}</div>
+        </div>
+        <span class="badge {{ 'badge-working' if working else 'badge-off' }}">
+            {{ 'Working' if working else 'OFF' }}
+        </span>
+    </div>
+    <div class="light-status">Current state: {{ escape(str(light['status_summary'])) }}</div>
+    <form method="post" action="/traffic-lights">
+        <input type="hidden" name="traffic_light_id" value="{{ escape(str(light['traffic_light_id'])) }}">
+        <button type="submit" class="toggle-button">{{ 'Turn off' if working else 'Turn on' }}</button>
+    </form>
+</div>

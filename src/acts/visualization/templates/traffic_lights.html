@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="refresh" content="2">
+    <link rel="stylesheet" href="/static/style.css">
+    <title>ACTS Traffic Light Control</title>
+</head>
+<body>
+    <header>
+        <h1>Traffic Light Control</h1>
+        <div class="subtitle">Control for port {{ port }}. Refreshes every 2s.</div>
+        <div class="actions"><a href="/">Back to visualization</a></div>
+    </header>
+    <main>
+        {% for intersection in overview %}
+            <section class="intersection-card">
+                <h2>Intersection {{ escape(str(intersection['intersection_id'])) }}</h2>
+                <div class="lights-grid">
+                    {% for light in intersection['traffic_lights'] %}
+                        {% set working = bool(light["working"]) %}
+                        <div class="light-card">
+                            <div class="light-header">
+                                <div>
+                                    <div class="light-title">{{ escape(str(light['traffic_light_id'])) }}</div>
+                                    <div class="light-meta">Node {{ escape(str(light['node_id'])) }}</div>
+                                </div>
+                                <span class="badge {{ 'badge-working' if working else 'badge-off' }}">
+                                    {{ 'Working' if working else 'OFF' }}
+                                </span>
+                            </div>
+                            <div class="light-status">Current state: {{ escape(str(light['status_summary'])) }}</div>
+                            <form method="post" action="/traffic-lights">
+                                <input type="hidden" name="traffic_light_id" value="{{ escape(str(light['traffic_light_id'])) }}">
+                                <button type="submit" class="toggle-button">{{ 'Turn off' if working else 'Turn on' }}</button>
+                            </form>
+                        </div>
+                    {% end %}
+                </div>
+            </section>
+        {% end %}
+    </main>
+</body>
+</html>

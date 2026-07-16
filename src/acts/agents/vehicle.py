@@ -57,6 +57,20 @@ class VehicleAgent(PublishingAgent):
         # Return progression ratio clamped between 0 and 1
         return min(1.0, max(0.0, ticks_driven / self.edge_total_timer))
 
+    @property
+    def distance_to_node_meters(self) -> float:
+        """Restituisce la distanza in metri dal prossimo nodo (to_node)."""
+        if self.state != self.STATE_DRIVING or self.edge_total_timer <= 0:
+            return 0.0
+
+        from_node, to_node = self.pos
+        edge_data = self.model.G.get_edge_data(from_node, to_node) or {}
+        total_length = edge_data.get("length", 0.0)
+        
+        percentage_remaining = self.travel_timer / self.edge_total_timer
+        
+        return total_length * percentage_remaining
+
     # Public API: called by Mesa scheduler.
     def step(self):
         # Aggiornamento del veicolo per un singolo tick.
@@ -138,7 +152,7 @@ class VehicleAgent(PublishingAgent):
         max_speed = edge_data.get("max_speed", 5.0)
         
         effective_timer = max(1, round(length / max_speed))
-        print(f"Vehicle {self.unique_id} moving from {self.pos} to {next_node} with length {length}m and max speed {max_speed}m/tick, travel timer set to {effective_timer} ticks.")
+        #print(f"Vehicle {self.unique_id} moving from {self.pos} to {next_node} with length {length}m and max speed {max_speed}m/tick, travel timer set to {effective_timer} ticks.")
         
         self.runtime.travel_timer = effective_timer
         self.runtime.edge_total_timer = self.runtime.travel_timer

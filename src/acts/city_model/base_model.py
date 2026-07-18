@@ -38,23 +38,26 @@ class CityModel(Model):
         for intersection_id, intersection_nodes in self.intersection_nodes.items():
             meta = self.intersection_meta.get(intersection_id, {})
             external_conns = meta.get("external_connections", [])
+
+            intersection_phases = meta.get("phases", {})
             
             for node in intersection_nodes:
                 priority_edge_groups = meta.get("priority_edge_groups", [])
                 structured_edge_groups = []
                 
-                for group in priority_edge_groups:
-                    if not any(edge[0] == node for edge in group):
+                for direction_group in priority_edge_groups:
+                    if not any(direction.source_id == node for direction in direction_group.directions):
                         continue
                         
                     destinations = list(set(
-                        f"tl_{edge[1]}" for edge in group 
-                        if edge[1] != node
+                        f"tl_{direction.destination_id}" for direction in direction_group.directions
+                        if direction.destination_id != node
                     ))
                     
                     structured_edge_groups.append({
-                        "edges": group,
-                        "destinations": destinations
+                        "edges": direction_group.directions,
+                        "destinations": destinations,
+                        "phase_index": direction_group.phase_index
                     })
                             
                 # Calcolo dei tempi di percorrenza stimati (ETA) versos i vicini esterni
@@ -67,6 +70,8 @@ class CityModel(Model):
                         
                         estimated_time = round(edge_length / max_speed)
                         external_neighbor_travel_times[neighbor_id] = estimated_time
+
+                #print(f"Controlled directions for node {node} at intersection {intersection_id}: {structured_edge_groups}")
 
                 # Instanziazione Agente Semaforo
                 tl = TrafficLightAgent(
@@ -85,10 +90,10 @@ class CityModel(Model):
                 self.traffic_lights_by_intersection.setdefault(intersection_id, []).append(tl)
 
                 # Associazione dell'ID del gruppo semaforico agli archi del grafo
-                for group_idx, group in enumerate(structured_edge_groups):
-                    for edge in group["edges"]:
-                        if self.G.has_edge(edge[0], edge[1]):
-                            self.G[edge[0]][edge[1]]["tl_group_id"] = f"{node}_group{group_idx}"
+                for group_idx, structured_edge_group in enumerate(structured_edge_groups):
+                    for edge in structured_edge_group["edges"]:
+                        if self.G.has_edge(edge.source_id, edge.destination_id):
+                            self.G[edge.source_id][edge.destination_id]["tl_group_id"] = f"{node}_group{group_idx}"
 
     def step(self):
         self.node_departure_locks.clear()

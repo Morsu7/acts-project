@@ -11,13 +11,15 @@ class Request:
     requester_direction_id: str
     requester_score: float
     request_clock: int
+    requester_phase: int
 
 class ControlledDirection:
     """A group of edges that change color together."""
-    def __init__(self, direction_id: str, edges: list, destinations_ids: list):
+    def __init__(self, direction_id: str, edges: list, destinations_ids: list, phase_index: int):
         self.direction_id = direction_id
         self.edges = edges
         self.destinations_ids = destinations_ids
+        self.phase_index = phase_index
         self.state = DirectionState()
 
 class IncomingTrafficWave:
@@ -60,7 +62,8 @@ class TrafficLightAgent(SystemAgent):
             ControlledDirection(
                 direction_id=f"{self.unique_id}_dir{i}", 
                 edges=direction["edges"], 
-                destinations_ids=direction["destinations"])
+                destinations_ids=direction["destinations"],
+                phase_index=direction["phase_index"])
             for i, direction in enumerate(controlled_directions)
         ]
 
@@ -263,7 +266,7 @@ class TrafficLightAgent(SystemAgent):
             direction_state = direction.state.runtime
             #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} with edges {direction.edges}\n")
             # Edges that go inside the intersection
-            outgoing_lanes = set(int(edge[1]) for edge in direction.edges)
+            outgoing_lanes = set(int(direction.destination_id) for direction in direction.edges)
             ingoing_lanes = self._get_ingoing_edges()
             #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sees the following outgoing lanes: {outgoing_lanes}\n")
             #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sees the following ingoing lanes: {ingoing_lanes}\n")
@@ -345,7 +348,8 @@ class TrafficLightAgent(SystemAgent):
         data = {
             "direction_id": direction.direction_id,
             "queue_score": direction.state.score,
-            "request_clock": direction.state.request_clock
+            "request_clock": direction.state.request_clock,
+            "phase_index": direction.phase_index
         }
         self._send_event("REQUEST_GREEN", data)
 
@@ -452,7 +456,8 @@ class TrafficLightAgent(SystemAgent):
                             requester_id=requester_id,
                             requester_direction_id=msg["data"]["direction_id"],
                             requester_score=msg["data"]["queue_score"],
-                            request_clock=msg["data"]["request_clock"]
+                            request_clock=msg["data"]["request_clock"],
+                            requester_phase=msg["data"]["phase_index"]
                         )
 
                 case "TRAFFIC_SIGNAL" if not self.failsafe_active:
@@ -472,31 +477,35 @@ class TrafficLightAgent(SystemAgent):
             to_process = list(self.requests.keys())
             for id in to_process:
                 request = self.requests[id]
-                # TODO: each direction independently checks if it can give permission to the requester
+
                 if self._can_give_permission(request):
-                    if self._are_all_directions_red():
+                    if not self._turn_incompatible_directions_red(request.requester_phase):  # All directions of other phases are already red, so we can grant permission
                         self._send_allow_green(request.requester_id, request.requester_direction_id, request.request_clock)
-                        # TODO: fix check
+                        
                         for direction in self.directions:
                             if direction.state.permissions.get(request.requester_id):
                                 phases = self.model.intersection_meta[self.intersection_id].get("phases", {})
-                                my_phase = phases.get(direction.direction_id)
                                 requester_phase = phases.get(request.requester_direction_id)
-                                if my_phase is None or my_phase != requester_phase:
+                                if direction.phase_index is None or direction.phase_index != requester_phase:
                                     direction.state.permissions.pop(request.requester_id)  # Remove the permission after granting it
 
                         self.requests.pop(id)  # Remove the request after granting permission
-                    else:
-                        for direction in self.directions:
-                            if direction.state.runtime.status == LightStatus.GREEN:
-                                direction.state.must_turn_yellow = True  # Set the flag to turn yellow before granting permission
+
                 else:
                     self.requests.pop(id)  # Remove the request if it cannot be granted
         
         #self.requests.clear()  # Clear requests after processing
 
-    def _are_all_directions_red(self) -> bool:
-        return all(direction.state.runtime.status == LightStatus.RED for direction in self.directions)
+    # Turns all incompatible directions red (if they are not already) and returns True if it made the change, False if they were already red
+    def _turn_incompatible_directions_red(self, requester_phase: int) -> bool:
+        changes = False
+        for direction in self.directions:
+            if direction.phase_index is not None and direction.phase_index != requester_phase:
+                if direction.state.runtime.status == LightStatus.GREEN:
+                    direction.state.must_turn_yellow = True
+                    changes = True
+
+        return changes
 
     def _send_alive_signal(self, target_id: str):
         data = {
@@ -506,13 +515,12 @@ class TrafficLightAgent(SystemAgent):
             
     def _can_give_permission(self, request: Request) -> bool:
         phases = self.model.intersection_meta[self.intersection_id].get("phases", {})
-        requester_phase = phases.get(request.requester_direction_id)
+        requester_phase = request.requester_phase
 
         for direction in self.directions:
-            my_phase = phases.get(direction.direction_id)
 
             # skip blocks if we share the same green phase
-            if my_phase is not None and my_phase == requester_phase:
+            if direction.phase_index is not None and direction.phase_index == requester_phase:
                 continue
 
             # concede green permission if i reached the maximum green time, even if my score is higher
@@ -550,19 +558,19 @@ class TrafficLightAgent(SystemAgent):
                 
         return True
 
-    def _store_request(self, requester_id: str, requester_direction_id: str, requester_score: float, request_clock: int) -> None:
+    def _store_request(self, requester_id: str, requester_direction_id: str, requester_score: float, request_clock: int, requester_phase: int) -> None:
         existing = self.requests.get(requester_direction_id)
 
         # keep only most recent request per requester
         if existing is None or request_clock >= existing.request_clock:
-            self.requests[requester_direction_id] = Request(requester_id, requester_direction_id, requester_score, request_clock)
+            self.requests[requester_direction_id] = Request(requester_id, requester_direction_id, requester_score, request_clock, requester_phase)
 
     def _update_graph(self):
         # Update the graph with the current state of the traffic light
         edges = self.model.G.edges(self.node_id, data=True)
         for source, target, edge_data in edges:
             for direction in self.directions:
-                if any(target == edge[1] for edge in direction.edges):
+                if any(target == edge.destination_id for edge in direction.edges):
                     edge_data["tl_priority_score"] = self._compute_score(direction)
                     edge_data["tl_waiting_cars"] = direction.state.runtime.queue_length
                     edge_data["tl_waiting_seconds"] = direction.state.runtime.waiting_time

@@ -1,5 +1,7 @@
 from acts.map.road_network import RoadNetwork
 
+from acts.map.road_network import Direction, DirectionGroup
+
 
 def get_config():
 
@@ -88,27 +90,12 @@ def get_config():
     net.set_intersection_priority_groups(
         0,
         [
-            [[10,20],[10,30],[10,40]],
-            [[20,10],[20,30],[20,40]],
-            [[30,10],[30,20],[30,40]],
-            [[40,10],[40,20],[40,30]]
+            DirectionGroup(directions=[Direction(10, 20), Direction(10, 30), Direction(10, 40)], phase_index=1),
+            DirectionGroup(directions=[Direction(20, 10), Direction(20, 30), Direction(20, 40)], phase_index=2),
+            DirectionGroup(directions=[Direction(30, 10), Direction(30, 20), Direction(30, 40)], phase_index=1),
+            DirectionGroup(directions=[Direction(40, 10), Direction(40, 20), Direction(40, 30)], phase_index=2)
         ]
     )
-
-
-    # Vertical and horizontal compatibility
-
-    net.set_intersection_phases(
-        0,
-        {
-            "tl_10_dir0":1,
-            "tl_30_dir0":1,
-
-            "tl_20_dir0":2,
-            "tl_40_dir0":2
-        }
-    )
-
 
     net.compile_metadata()
 

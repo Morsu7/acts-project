@@ -1,5 +1,6 @@
 from acts.map.road_network import RoadNetwork
 
+from acts.map.road_network import Direction, DirectionGroup
 
 def get_config():
 
@@ -49,10 +50,10 @@ def get_config():
     net.add_turn_edge(10,30,"turn")
     net.add_turn_edge(20,30,"turn")
 
-    net.set_intersection_phases(0, {
-        "tl_10_dir0": 1,  # single car
-        "tl_20_dir0": 2,  # multiple car
-    })
+    #net.set_intersection_phases(0, {
+    #    "tl_10_dir0": 1,  # single car
+    #    "tl_20_dir0": 2,  # multiple car
+    #})
 
     net.compile_metadata()
 

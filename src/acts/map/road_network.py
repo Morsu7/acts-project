@@ -4,6 +4,17 @@ import math
 from typing import Optional, Any
 import networkx as nx
 
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Direction:
+    source_id: int
+    destination_id: int
+
+@dataclass(frozen=True)
+class DirectionGroup:
+    directions: list[Direction]
+    phase_index: int
 
 class RoadNetwork:
     """
@@ -58,11 +69,7 @@ class RoadNetwork:
             max_speed=max_speed
         )
 
-    def set_intersection_phases(self, intersection_id: int, phases: dict[str, int]) -> None:
-        """Azione Atomica Manuale: Imposta esplicitamente le fasi semaforiche per un incrocio."""
-        self.manual_phases[intersection_id] = phases
-
-    def set_intersection_priority_groups(self, intersection_id: int, groups: list[list[list[int]]]) -> None:
+    def set_intersection_priority_groups(self, intersection_id: int, groups: list[DirectionGroup]) -> None:
         """Azione Atomica Manuale: Imposta esplicitamente i gruppi di manovre prioritarie."""
         self.manual_priority_groups[intersection_id] = groups
 
@@ -140,32 +147,33 @@ class RoadNetwork:
             if local_phases is None:
                 local_phases = {f"tl_{n}_dir0": 1 for n in sorted_nodes}
 
-            edge_groups = self.manual_priority_groups.get(intersection_id)
-            if edge_groups is None:
-                edge_groups = self._build_deterministic_edge_groups(sorted_nodes)
+            priority_groups = self.manual_priority_groups.get(intersection_id)
+            if priority_groups is None:
+                priority_groups = self._build_deterministic_edge_groups(sorted_nodes)
 
             intersections_meta[intersection_id] = {
                 "nodes": sorted_nodes,
                 "is_pass_through": len(neighbors_map.get(intersection_id, set())) <= 2,
                 "neighbor_intersections": sorted(list(neighbors_map.get(intersection_id, set()))),
                 "position": self.intersection_centers.get(intersection_id, (0.0, 0.0)),
-                "priority_edge_groups": edge_groups,
+                "priority_edge_groups": priority_groups,
                 "neighbor_traffic_lights": sorted(list(neighbor_traffic_lights)),
-                "external_connections": external_connections,
-                "phases": local_phases
+                "external_connections": external_connections
             }
 
         self.graph.graph["intersections"] = intersections_meta
 
-    def _build_deterministic_edge_groups(self, intersection_nodes: list[int]) -> list[list[list[int]]]:
+    def _build_deterministic_edge_groups(self, intersection_nodes: list[int]) -> list[DirectionGroup]:
         """Crea gruppi di priorità standard deterministici (ogni svolta è indipendente)."""
         nodes_set = set(intersection_nodes)
         groups = []
+        n = 0
         for source_node in intersection_nodes:
             outgoing = sorted([v for _, v in self.graph.out_edges(source_node) if v in nodes_set])
             for target_node in outgoing:
-                # Ogni singola manovra da sorgente a destinazione fa gruppo a sé
-                groups.append([[source_node, target_node]])
+                # Ogni singola manovra da sorgente a destinazione fa gruppo a sé con fase separata
+                groups.append(DirectionGroup(directions=[Direction(source_node, target_node)], phase_index=n))
+                n += 1
         return groups
 
     def _get_geo_length(self, u_port: int, v_port: int) -> float:

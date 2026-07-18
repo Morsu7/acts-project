@@ -7,6 +7,7 @@ from typing import Optional, Any
 import networkx as nx
 
 from acts.map import RoadNetwork
+from acts.map.road_network import Direction, DirectionGroup
 
 class TopologyBuilder:
 
@@ -33,10 +34,6 @@ class TopologyBuilder:
                 if attrs.get("intersection") == intersection_id
             ])
             
-            # Genera fasi randomiche
-            random_phases = {f"tl_{n}_dir0": self.random_generator.randint(1, max(1, len(sorted_nodes))) for n in sorted_nodes}
-            self.network.set_intersection_phases(intersection_id, random_phases)
-            
             # Genera gruppi di priorità randomici usando la vecchia funzione del builder
             random_groups = self._build_random_edge_groups(sorted_nodes)
             self.network.set_intersection_priority_groups(intersection_id, random_groups)
@@ -46,9 +43,9 @@ class TopologyBuilder:
         
         return self.network.graph
 
-    def _build_random_edge_groups(self, intersection_nodes: list[int]) -> list[list[list[int]]]:
+    def _build_random_edge_groups(self, intersection_nodes: list[int]) -> list[DirectionGroup]:
         nodes_set = set(intersection_nodes)
-        groups = []
+        groups = list[DirectionGroup]()
         for source_node in intersection_nodes:
             outgoing = sorted([v for _, v in self.network.graph.out_edges(source_node) if v in nodes_set])
             if not outgoing: continue
@@ -63,7 +60,8 @@ class TopologyBuilder:
             
             for partition in partitions:
                 partition.sort()
-                groups.append([[source_node, target_node] for target_node in partition])
+                phase_index = self.random_generator.randint(0, max(0, len(intersection_nodes) - 1))
+                groups.append(DirectionGroup(directions=[Direction(source_node, target_node) for target_node in partition], phase_index=phase_index))
         return groups
 
     def _build_base_positions(self) -> dict[int, tuple[float, float]]:

@@ -1,5 +1,7 @@
 from acts.map.road_network import RoadNetwork
 
+from acts.map.road_network import Direction, DirectionGroup
+
 def get_config():
     """
     Scenario deterministico: Incrocio a 4 vie simmetrico.
@@ -59,27 +61,15 @@ def get_config():
     # 6. Configurazione dei gruppi di priorità
     # Creiamo un gruppo isolato per ogni semaforo, contenente tutte le sue uscite.
     # In questo modo il ciclo estrarrà esattamente un solo "dir0" per ogni agente semaforo.    
-    priority_nord  = [[10, 20], [10, 30], [10, 40]]
-    priority_est   = [[20, 10], [20, 30], [20, 40]]
-    priority_sud   = [[30, 10], [30, 20], [30, 40]]
-    priority_ovest = [[40, 10], [40, 20], [40, 30]]
-    
-    net.set_intersection_priority_groups(0, [
-        priority_nord, 
-        priority_est, 
-        priority_sud, 
-        priority_ovest
-    ])
-
-    # 7. Configurazione delle Fasi (Semafori paralleli = Stessa fase)
-    # Asse Verticale (Nord / Sud) -> Fase 1
-    # Asse Orizzontale (Est / Ovest) -> Fase 2
-    net.set_intersection_phases(0, {
-        "tl_10_dir0": 1,  # Nord
-        "tl_30_dir0": 1,  # Sud
-        "tl_20_dir0": 2,  # Est
-        "tl_40_dir0": 2   # Ovest
-    })
+    net.set_intersection_priority_groups(
+        0,
+        [
+            DirectionGroup(directions=[Direction(10, 20), Direction(10, 30), Direction(10, 40)], phase_index=1),
+            DirectionGroup(directions=[Direction(20, 10), Direction(20, 30), Direction(20, 40)], phase_index=2),
+            DirectionGroup(directions=[Direction(30, 10), Direction(30, 20), Direction(30, 40)], phase_index=1),
+            DirectionGroup(directions=[Direction(40, 10), Direction(40, 20), Direction(40, 30)], phase_index=2)
+        ]
+    )
     
     # Compilazione dei metadati strutturali del grafo
     net.compile_metadata()

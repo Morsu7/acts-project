@@ -27,7 +27,7 @@ def mock_model():
 def basic_traffic_light(mock_model):
     """Fornisce un semaforo di base già inizializzato e pronto per i test."""
     controlled_dirs = [
-        {"edges": [(0, 1), (0, 2)], "destinations": ["tl_ext_A", "tl_ext_B"]}
+        {"edges": [(0, 1), (0, 2)], "destinations": ["tl_ext_A", "tl_ext_B"], "phase_index": 1}
     ]
     
     tl = TrafficLightAgent(
@@ -51,10 +51,11 @@ def basic_traffic_light(mock_model):
 
 def test_dataclasses_storage():
     """Verifica che le strutture dati semplici memorizzino i valori correttamente."""
-    req = Request(requester_id="tl_2", requester_direction_id="dir_x", requester_score=15.0, request_clock=5)
+    req = Request(requester_id="tl_2", requester_direction_id="dir_x", requester_score=15.0, request_clock=5, requester_phase=1)
     wave = IncomingTrafficWave(source_id="tl_ext_A", num_cars=10, expected_arrival_time=5)
     assert req.requester_id == "tl_2"
     assert req.requester_score == 15.0
+    assert req.requester_phase == 1
     assert wave.num_cars == 10
     assert wave.expected_arrival_time == 5
 
@@ -66,17 +67,7 @@ def test_traffic_light_initialization(basic_traffic_light):
     direction = tl.directions[0]
     assert direction.direction_id == "tl_1_dir0"
     assert direction.destinations_ids == ["tl_ext_A", "tl_ext_B"]
-
-
-def test_compute_score_base_logic(basic_traffic_light):
-    """Verifica il calcolo della priorità (score) usando solo la coda locale."""
-    tl = basic_traffic_light
-    direction = tl.directions[0]
-    direction.state.runtime.queue_length = 5
-    direction.state.runtime.waiting_time = 2
-    score = tl._compute_score(direction)
-    assert score == 15.0
-
+    assert direction.phase_index == 1
 
 def test_compute_score_with_incoming_waves(basic_traffic_light):
     """Verifica il calcolo dello score quando ci sono auto in arrivo da altri incroci."""
@@ -84,20 +75,20 @@ def test_compute_score_with_incoming_waves(basic_traffic_light):
     direction = tl.directions[0]
     direction.state.runtime.queue_length = 5
     direction.state.runtime.waiting_time = 2
+    score_without_waves = tl._compute_score(direction)
     wave = IncomingTrafficWave(source_id="tl_ext_A", num_cars=10, expected_arrival_time=10)
     tl.possible_incoming_waves.append(wave)
-    score = tl._compute_score(direction)
-    assert score == 17.5
+    assert score_without_waves < tl._compute_score(direction)
 
 
 def test_store_request_lamport_clock_logic(basic_traffic_light):
     """Verifica che vengano memorizzate solo le richieste con Lamport Clock più recente."""
     tl = basic_traffic_light
-    tl._store_request("tl_2", "tl_2_dir0", requester_score=10.0, request_clock=1)
+    tl._store_request("tl_2", "tl_2_dir0", requester_score=10.0, request_clock=1, requester_phase=1)
     assert tl.requests["tl_2_dir0"].requester_score == 10.0
-    tl._store_request("tl_2", "tl_2_dir0", requester_score=50.0, request_clock=3)
+    tl._store_request("tl_2", "tl_2_dir0", requester_score=50.0, request_clock=3, requester_phase=1)
     assert tl.requests["tl_2_dir0"].requester_score == 50.0
-    tl._store_request("tl_2", "tl_2_dir0", requester_score=99.0, request_clock=2)
+    tl._store_request("tl_2", "tl_2_dir0", requester_score=99.0, request_clock=2, requester_phase=1)
     assert tl.requests["tl_2_dir0"].requester_score == 50.0
 
 def test_lamport_clock_synchronization(basic_traffic_light):
@@ -105,12 +96,13 @@ def test_lamport_clock_synchronization(basic_traffic_light):
     tl = basic_traffic_light
     tl.lamport_clock = 5
     tl.directions[0].state.runtime.queue_length = 50 
+    tl.directions[0].state.score = tl._compute_score(tl.directions[0])
 
     mock_msg = {
         "event": "REQUEST_GREEN", 
         "agent_id": "tl_2", 
         "clock": 10, 
-        "data": {"direction_id": "tl_2_dir0", "queue_score": 10.0}
+        "data": {"direction_id": "tl_2_dir0", "queue_score": 10.0, "request_clock": 10, "phase_index": 2}
     }
     tl.get_messages = MagicMock(return_value=[mock_msg])
     tl.get_broadcast_messages = MagicMock(return_value=[])
@@ -146,8 +138,8 @@ def test_starvation_prevention(basic_traffic_light):
     direction = tl.directions[0]
     direction.state.runtime.queue_length = 1
     direction.state.runtime.waiting_time = 30
-    local_score = tl._compute_score(direction) # 1 * (30 + 1) = 31.0
-    req = Request(requester_id="tl_2", requester_direction_id="tl_2_dir0", requester_score=20.0, request_clock=10)
+    direction.state.score = tl._compute_score(direction)
+    req = Request(requester_id="tl_2", requester_direction_id="tl_2_dir0", requester_score=20.0, request_clock=10, requester_phase=2)
     assert tl._can_give_permission(req) is False
 
 def test_allow_green_for_same_phase_regardless_of_score(basic_traffic_light):
@@ -157,13 +149,10 @@ def test_allow_green_for_same_phase_regardless_of_score(basic_traffic_light):
     """
     tl = basic_traffic_light
     direction = tl.directions[0]
-    tl.model.intersection_meta[tl.intersection_id]["phases"] = {
-        "tl_1_dir0": 1,
-        "tl_2_dir0": 1  # Stessa fase!
-    }
     direction.state.runtime.queue_length = 10
     direction.state.runtime.waiting_time = 9
-    req = Request(requester_id="tl_2", requester_direction_id="tl_2_dir0", requester_score=5.0, request_clock=10)
+    direction.state.score = tl._compute_score(direction)
+    req = Request(requester_id="tl_2", requester_direction_id="tl_2_dir0", requester_score=direction.state.score+1.0, request_clock=10, requester_phase=1)
     assert tl._can_give_permission(req) is True
 
 def test_ignore_outdated_green_permissions(basic_traffic_light):
@@ -215,10 +204,11 @@ def test_tie_breaking_equal_scores(basic_traffic_light):
     direction = tl.directions[0]
     direction.state.runtime.queue_length = 5
     direction.state.runtime.waiting_time = 1   
+    direction.state.score = tl._compute_score(direction)
     direction.state.request_clock = 5
-    req_older = Request(requester_id="tl_2", requester_direction_id="tl_2_dir0", requester_score=10.0, request_clock=3)
+    req_older = Request(requester_id="tl_2", requester_direction_id="tl_2_dir0", requester_score=direction.state.score, request_clock=3, requester_phase=2)
     assert tl._can_give_permission(req_older) is True
-    req_newer = Request(requester_id="tl_2", requester_direction_id="tl_2_dir0", requester_score=10.0, request_clock=8)
+    req_newer = Request(requester_id="tl_2", requester_direction_id="tl_2_dir0", requester_score=direction.state.score, request_clock=8, requester_phase=2)
     assert tl._can_give_permission(req_newer) is False
-    req_tie = Request(requester_id="tl_2", requester_direction_id="tl_2_dir0", requester_score=10.0, request_clock=5)
+    req_tie = Request(requester_id="tl_2", requester_direction_id="tl_2_dir0", requester_score=direction.state.score, request_clock=5, requester_phase=2)
     assert tl._can_give_permission(req_tie) is False

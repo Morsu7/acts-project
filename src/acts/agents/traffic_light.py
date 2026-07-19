@@ -33,11 +33,13 @@ class TrafficLightAgent(SystemAgent):
 
     # PARAMETERS (TODO: make them configurable and move them to a config file)
     TIME_BETWEEN_REQUESTS = 3 # How often I can ask for green (In mesa ticks)
-    TIME_BETWEEN_SIGNALS = 5 # How often I can tell a neighbour about incoming traffic (In mesa ticks)
+    TIME_BETWEEN_SIGNALS = 2 # How often I can tell a neighbour about incoming traffic (In mesa ticks)
     UNCERTAINTY_FACTOR = 0.5 # How much weight to give to incoming traffic when computing the score
+    INCOMING_WAVE_WEIGHT = 4.0 # Sostituisce UNCERTAINTY_FACTOR per dare vero peso alle onde
     INTERSECTION_CROSSING_TIME = 3 # How long it takes for a car to cross the intersection (In mesa ticks)
     FAILSAFE_THRESHOLD = 6 # How long to wait before checking for failsafe (In mesa ticks)
     HEALTH_CHECK_THRESHOLD = 3 # How long before going into failsafe if no replies (In mesa ticks)
+    NEAR_TRAFFIC_LIGHT_THRESHOLD = 30 # Define how close a driving car must be (in meters) to be counted
 
     RECOVERY_THRESHOLD = 6 # How long to wait before checking for recovery (In mesa ticks)
 
@@ -259,9 +261,6 @@ class TrafficLightAgent(SystemAgent):
         node_agents = self.model.grid.get_cell_list_contents([self.node_id])
         queued_vehicles = [a for a in node_agents if _is_vehicle_agent(a) and a.state == "QUEUED"]
 
-        # Define how close a driving car must be (in meters) to be counted
-        NEAR_TRAFFIC_LIGHT_THRESHOLD = 30 
-
         for direction in self.directions:
             direction_state = direction.state.runtime
             #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} with edges {direction.edges}\n")
@@ -290,7 +289,7 @@ class TrafficLightAgent(SystemAgent):
                 driving_vehicles_on_edge = edge_data.get("vehicles", [])
 
                 for v in driving_vehicles_on_edge:
-                    if v.state == "DRIVING" and v.distance_to_node_meters <= NEAR_TRAFFIC_LIGHT_THRESHOLD:
+                    if v.state == "DRIVING" and v.distance_to_node_meters <= self.NEAR_TRAFFIC_LIGHT_THRESHOLD:
                         if v.path and len(v.path) > 2:
                             #print(f"car path: {v.path}\n")
                             # path[1] is this light. path[2] is their downstream turn.
@@ -299,8 +298,8 @@ class TrafficLightAgent(SystemAgent):
                             # Check if that future turn aligns with this direction grouping
                             if downstream_node_intent in outgoing_lanes:
                                 proximity_factor = (
-                                    NEAR_TRAFFIC_LIGHT_THRESHOLD - v.distance_to_node_meters
-                                ) / NEAR_TRAFFIC_LIGHT_THRESHOLD
+                                    self.NEAR_TRAFFIC_LIGHT_THRESHOLD - v.distance_to_node_meters
+                                ) / self.NEAR_TRAFFIC_LIGHT_THRESHOLD
 
                                 count += proximity_factor
                         else:
@@ -330,7 +329,7 @@ class TrafficLightAgent(SystemAgent):
         )
 
         incoming = sum(
-            wave.num_cars /
+            wave.num_cars * self.INCOMING_WAVE_WEIGHT /
             (1 + wave.expected_arrival_time / 10)
             for wave in self.possible_incoming_waves
         )

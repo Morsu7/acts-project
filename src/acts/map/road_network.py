@@ -10,6 +10,8 @@ from dataclasses import dataclass
 class Direction:
     source_id: int
     destination_id: int
+    length: float = None
+    speed: float = None
 
 @dataclass(frozen=True)
 class DirectionGroup:
@@ -147,8 +149,25 @@ class RoadNetwork:
             if local_phases is None:
                 local_phases = {f"tl_{n}_dir0": 1 for n in sorted_nodes}
 
-            priority_groups = self.manual_priority_groups.get(intersection_id)
-            if priority_groups is None:
+            manual_groups = self.manual_priority_groups.get(intersection_id)
+            if manual_groups is not None:
+                # L'utente ha inserito i gruppi manualmente. Li arricchiamo con i dati del grafo.
+                priority_groups = []
+                for group in manual_groups:
+                    enriched_directions = []
+                    for d in group.directions:
+                        src_id = int(d.source_id)
+                        dst_id = int(d.destination_id)
+                        edge_data = self.graph.get_edge_data(src_id, dst_id, default={})
+                        length = float(edge_data.get("length", 100.0)) if d.length is None else d.length
+                        speed = float(edge_data.get("max_speed", 5.0)) if d.speed is None else d.speed
+                        enriched_directions.append(
+                            Direction(source_id=src_id, destination_id=dst_id, length=length, speed=speed)
+                        )
+                    
+                    priority_groups.append(DirectionGroup(directions=enriched_directions, phase_index=group.phase_index))
+            else:
+                # Se l'utente non ha impostato nulla, usiamo il generatore automatico di default
                 priority_groups = self._build_deterministic_edge_groups(sorted_nodes)
 
             intersections_meta[intersection_id] = {
@@ -172,7 +191,10 @@ class RoadNetwork:
             outgoing = sorted([v for _, v in self.graph.out_edges(source_node) if v in nodes_set])
             for target_node in outgoing:
                 # Ogni singola manovra da sorgente a destinazione fa gruppo a sé con fase separata
-                groups.append(DirectionGroup(directions=[Direction(source_node, target_node)], phase_index=n))
+                edge_data = self.graph.get_edge_data(source_node, target_node, default={})
+                length = edge_data.get("length", 100.0)
+                speed = edge_data.get("max_speed", 13.89)
+                groups.append(DirectionGroup(directions=[Direction(source_node, target_node, length=length, speed=speed)], phase_index=n))
                 n += 1
         return groups
 

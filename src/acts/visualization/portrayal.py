@@ -39,6 +39,7 @@ def network_portrayal(G):
             waiting_cars_score = float(edge_data.get("tl_waiting_cars_score", 0.0))
             waiting_time_score = float(edge_data.get("tl_waiting_time_score", 0.0))
             priority_score = float(edge_data.get("tl_priority_score", 0.0))
+            last_used_score = float(edge_data.get("tl_last_used_score", 0.0))
             constraint_group = edge_data.get("tl_group_id", None)
             group_priority_score = float(edge_data.get("tl_group_score", 0.0))
             permissions_ids = edge_data.get("tl_permissions_ids", [])
@@ -48,6 +49,7 @@ def network_portrayal(G):
                 f"<br>Queued cars: {waiting_cars}"
                 f"<br>Waiting seconds: {waiting_seconds}"
                 f"<br>Priority score: {priority_score:.2f}"
+                f"<br>Last used score: {last_used_score:.2f}"
                 f"<br>Group summed score: {group_priority_score:.2f}"
                 f"<br>Status light: {edge_tl_state}"
                 f"<br>Permissions IDs: {', '.join(permissions_ids) if permissions_ids else '-'}"

@@ -61,7 +61,7 @@ class TopologyBuilder:
             for partition in partitions:
                 partition.sort()
                 phase_index = self.random_generator.randint(0, max(0, len(intersection_nodes) - 1))
-                groups.append(DirectionGroup(directions=[Direction(source_node, target_node) for target_node in partition], phase_index=phase_index))
+                groups.append(DirectionGroup(directions=[Direction(source_node, target) for target in partition], phase_index=phase_index))
         return groups
 
     def _build_base_positions(self) -> dict[int, tuple[float, float]]:

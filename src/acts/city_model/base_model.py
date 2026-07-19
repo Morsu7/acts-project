@@ -111,6 +111,13 @@ class CityModel(Model):
         self.node_departure_locks.add(node_id)
         return True
 
+    def release_unused_node_lock(self, node_id: int) -> None:
+        """
+        Releases the lock for a node if it was not used during the current tick.
+        This allows other vehicles to depart from the same node in the next tick.
+        """
+        self.node_departure_locks.discard(node_id)
+
     def toggle_traffic_light(self, traffic_light_id: str) -> bool | None:
         traffic_light = self.traffic_lights_by_id.get(traffic_light_id)
         if traffic_light is None:

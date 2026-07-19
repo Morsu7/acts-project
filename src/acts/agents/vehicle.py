@@ -147,6 +147,7 @@ class VehicleAgent(PublishingAgent):
         edge_data = self.model.G.get_edge_data(self.pos, next_node) or {}
         edge_state = edge_data.get("tl_state")
         if edge_state is not None and str(edge_state).upper() != "GREEN":
+            self.model.release_unused_node_lock(self.pos)
             return
 
         # --- UPDATED MOVEMENT MATH: Physical parameters determine timing ---

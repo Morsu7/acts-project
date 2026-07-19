@@ -21,6 +21,7 @@ class ControlledDirection:
         self.destinations_ids = destinations_ids
         self.phase_index = phase_index
         self.state = DirectionState()
+        self.outgoing_lanes = set(int(edge.destination_id) for edge in edges)
 
 class IncomingTrafficWave:
     """A group of cars that are approaching the traffic light from a specific direction."""
@@ -269,7 +270,7 @@ class TrafficLightAgent(SystemAgent):
             direction_state = direction.state.runtime
             #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} with edges {direction.edges}\n")
             # Edges that go inside the intersection
-            outgoing_lanes = set(int(direction.destination_id) for direction in direction.edges)
+            outgoing_lanes = direction.outgoing_lanes
             ingoing_lanes = self._get_ingoing_edges()
             #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sees the following outgoing lanes: {outgoing_lanes}\n")
             #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sees the following ingoing lanes: {ingoing_lanes}\n")
@@ -578,7 +579,7 @@ class TrafficLightAgent(SystemAgent):
         for source, target, edge_data in edges:
             for direction in self.directions:
                 if any(target == edge.destination_id for edge in direction.edges):
-                    edge_data["tl_priority_score"] = self._compute_score(direction)
+                    edge_data["tl_priority_score"] = direction.state.score
                     edge_data["tl_waiting_cars"] = direction.state.runtime.queue_length
                     edge_data["tl_waiting_seconds"] = direction.state.runtime.waiting_time
                     edge_data["tl_state"] = "OFF" if self.turned_off else direction.state.runtime.status

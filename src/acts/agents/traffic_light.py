@@ -21,6 +21,8 @@ class ControlledDirection:
         self.destinations_ids = destinations_ids
         self.phase_index = phase_index
         self.state = DirectionState()
+        self.outgoing_lanes = set(int(edge.destination_id) for edge in edges)
+        self.crossing_time = max(edge.length / edge.speed if edge.speed > 0 else 1 for edge in edges) if edges else 1
 
 class IncomingTrafficWave:
     """A group of cars that are approaching the traffic light from a specific direction."""
@@ -34,20 +36,18 @@ class TrafficLightAgent(SystemAgent):
     # PARAMETERS (TODO: make them configurable and move them to a config file)
     TIME_BETWEEN_REQUESTS = 3 # How often I can ask for green (In mesa ticks)
     TIME_BETWEEN_SIGNALS = 2 # How often I can tell a neighbour about incoming traffic (In mesa ticks)
+    COOLDOWN_AFTER_PERMISSION_GRANTED = TIME_BETWEEN_REQUESTS + 2
     UNCERTAINTY_FACTOR = 0.5 # How much weight to give to incoming traffic when computing the score
     INCOMING_WAVE_WEIGHT = 4.0 # Sostituisce UNCERTAINTY_FACTOR per dare vero peso alle onde
-    INTERSECTION_CROSSING_TIME = 3 # How long it takes for a car to cross the intersection (In mesa ticks)
     FAILSAFE_THRESHOLD = 6 # How long to wait before checking for failsafe (In mesa ticks)
     HEALTH_CHECK_THRESHOLD = 3 # How long before going into failsafe if no replies (In mesa ticks)
     NEAR_TRAFFIC_LIGHT_THRESHOLD = 30 # Define how close a driving car must be (in meters) to be counted
 
     RECOVERY_THRESHOLD = 6 # How long to wait before checking for recovery (In mesa ticks)
 
-    YELLOW_TIME = INTERSECTION_CROSSING_TIME
-
     MIN_GREEN_TIME = 5
     MAX_GREEN_TIME = 30 # After this time, i need to concede green permission even when asked even if my score is higher
-    GREEN_COOLDOWN_TIME = YELLOW_TIME + 5 # After turning yellow, i must wait at least this time before asking to turn green again
+    GREEN_COOLDOWN_TIME = 8 # After turning yellow, i must wait at least this time before asking to turn green again
 
     def __init__(self, unique_id, model, intersection_id, node_id, controlled_directions, inter_neighbors=None, outgoing_external_neighbors_travel_times=None):
         super().__init__(unique_id, model, f"channel_{intersection_id}")
@@ -68,6 +68,8 @@ class TrafficLightAgent(SystemAgent):
                 phase_index=direction["phase_index"])
             for i, direction in enumerate(controlled_directions)
         ]
+
+        self.time_since_last_permission: int = self.COOLDOWN_AFTER_PERMISSION_GRANTED # Counter to track time since the last permission was granted
 
         self.requests: dict[str, Request] = {}
 
@@ -97,6 +99,7 @@ class TrafficLightAgent(SystemAgent):
 
         self._update_failsafe_timers()
         self._update_cooldown_timers()
+        self.time_since_last_permission += 1  # Increment the counter for time since last permission granted
 
         # 3 possible states: 1) normal operation, 2) failsafe active, 3) agent turned off (not working)
         if self.failsafe_active:
@@ -107,7 +110,7 @@ class TrafficLightAgent(SystemAgent):
                 if self._wants_green(direction):
                     match direction.state.runtime.status:
                         case LightStatus.RED:
-                            if direction.state.time_since_last_request >= self.TIME_BETWEEN_REQUESTS:
+                            if direction.state.time_since_last_request >= self.TIME_BETWEEN_REQUESTS and self.time_since_last_permission >= self.COOLDOWN_AFTER_PERMISSION_GRANTED:
                                 self._request_green_light(direction)    # The request is specific to the direction
                                 #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent a request to turn green for direction {direction.direction_id} with score {self._compute_score(direction)}\n")
                         case LightStatus.GREEN:
@@ -265,7 +268,7 @@ class TrafficLightAgent(SystemAgent):
             direction_state = direction.state.runtime
             #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} with edges {direction.edges}\n")
             # Edges that go inside the intersection
-            outgoing_lanes = set(int(direction.destination_id) for direction in direction.edges)
+            outgoing_lanes = direction.outgoing_lanes
             ingoing_lanes = self._get_ingoing_edges()
             #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sees the following outgoing lanes: {outgoing_lanes}\n")
             #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sees the following ingoing lanes: {ingoing_lanes}\n")
@@ -334,7 +337,7 @@ class TrafficLightAgent(SystemAgent):
             for wave in self.possible_incoming_waves
         )
 
-        return own_score + incoming * self.UNCERTAINTY_FACTOR
+        return own_score + incoming * (1/len(direction.edges) if direction.edges else 0)
 
     def _request_green_light(self, direction: ControlledDirection):
         # Send a request to the intersection controller (or other traffic lights) to turn green
@@ -358,7 +361,7 @@ class TrafficLightAgent(SystemAgent):
 
             match direction.state.runtime.status:
                 case LightStatus.YELLOW:
-                    if direction.state.runtime.status_time >= self.YELLOW_TIME:
+                    if direction.state.runtime.status_time >= direction.crossing_time:
                         direction.state.runtime.status = LightStatus.RED
                         direction.state.runtime.status_time = 0
                         direction.state.green_cooldown = self.GREEN_COOLDOWN_TIME
@@ -374,7 +377,7 @@ class TrafficLightAgent(SystemAgent):
                         direction.state.runtime.status_time = 0
 
                         direction.state.permissions = {}  # Reset permissions after turning green
-                        direction.state.score = 0.0  # Reset score after turning green
+                        #direction.state.score = 0.0  # Reset score after turning green
                         self.deadlock_timer = 0  # Reset deadlock timer after successfully turning green (every agent is currently working)
 
     def _send_allow_green(self, target_tl_id, target_direction_id, request_clock):
@@ -388,20 +391,23 @@ class TrafficLightAgent(SystemAgent):
 
     def _send_traffic_signal(self, direction: ControlledDirection):
         for id in direction.destinations_ids:
+            node_id = int(id.split("_")[1])  # Assuming the id format is "tl_<node_id>"
+            edge = [edge for edge in direction.edges if edge.destination_id == node_id][0]
             data = {
                 "target_tl_id": id,
-                "num_cars": direction.state.runtime.queue_length
+                "num_cars": direction.state.runtime.queue_length,
+                "crossing_time": edge.length / edge.speed if edge.speed > 0 else 0.0
             }
             self._send_event("TRAFFIC_SIGNAL", data)
             #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent traffic signal to {id} with {data['num_cars']} cars\n")
         
         direction.state.time_since_last_signal = 0
 
-    def _forward_traffic_signal(self, incoming_score: float):
+    def _forward_traffic_signal(self, incoming_score: float, direction_crossing_time: float):
         for id, eta in self.outgoing_external_neighbors_travel_times.items():
             data = {
                 "target_tl_id": id,
-                "eta": eta + self.INTERSECTION_CROSSING_TIME,
+                "eta": eta + direction_crossing_time,
                 "num_cars": incoming_score
             }
             self._send_event("TRAFFIC_SIGNAL_FORWARD", data, broadcast=True)
@@ -461,7 +467,7 @@ class TrafficLightAgent(SystemAgent):
 
                 case "TRAFFIC_SIGNAL" if not self.failsafe_active:
                     if msg["data"]["target_tl_id"] == self.unique_id:
-                        self._forward_traffic_signal(msg["data"]["num_cars"])
+                        self._forward_traffic_signal(msg["data"]["num_cars"], msg["data"]["crossing_time"])
 
                 case "TRAFFIC_SIGNAL_FORWARD" if not self.failsafe_active:
                     if msg["data"]["target_tl_id"] == self.unique_id:
@@ -480,6 +486,7 @@ class TrafficLightAgent(SystemAgent):
                 if self._can_give_permission(request):
                     if not self._turn_incompatible_directions_red(request.requester_phase):  # All directions of other phases are already red, so we can grant permission
                         self._send_allow_green(request.requester_id, request.requester_direction_id, request.request_clock)
+                        self.time_since_last_permission = 0  # Reset the counter after granting permission
                         
                         for direction in self.directions:
                             if direction.state.permissions.get(request.requester_id):
@@ -564,6 +571,9 @@ class TrafficLightAgent(SystemAgent):
         if existing is None or request_clock >= existing.request_clock:
             self.requests[requester_direction_id] = Request(requester_id, requester_direction_id, requester_score, request_clock, requester_phase)
 
+    def _get_permissions_id_list(self, direction: ControlledDirection) -> list[str]:
+        return list(direction.state.permissions.keys())
+
     def _update_graph(self):
         # Update the graph with the current state of the traffic light
         edges = self.model.G.edges(self.node_id, data=True)
@@ -571,7 +581,9 @@ class TrafficLightAgent(SystemAgent):
             for direction in self.directions:
                 if any(target == edge.destination_id for edge in direction.edges):
                     edge_data["tl_priority_score"] = self._compute_score(direction)
+                    edge_data["tl_last_used_score"] = direction.state.score
                     edge_data["tl_waiting_cars"] = direction.state.runtime.queue_length
                     edge_data["tl_waiting_seconds"] = direction.state.runtime.waiting_time
                     edge_data["tl_state"] = "OFF" if self.turned_off else direction.state.runtime.status
                     edge_data['tl_state_time'] = direction.state.runtime.status_time
+                    edge_data['tl_permissions_ids'] = self._get_permissions_id_list(direction)

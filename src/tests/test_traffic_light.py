@@ -7,6 +7,7 @@ from acts.agents.traffic_light import (
     IncomingTrafficWave
 )
 from acts.agents.state import LightStatus
+from acts.map.road_network import Direction
 
 # ==========================================
 # FIXTURES (Preparazione dell'ambiente)
@@ -27,7 +28,7 @@ def mock_model():
 def basic_traffic_light(mock_model):
     """Fornisce un semaforo di base già inizializzato e pronto per i test."""
     controlled_dirs = [
-        {"edges": [(0, 1), (0, 2)], "destinations": ["tl_ext_A", "tl_ext_B"], "phase_index": 1}
+        {"edges": [Direction(0, 1, 10, 2), Direction(0, 2, 15, 3)], "destinations": ["tl_ext_A", "tl_ext_B"], "phase_index": 1}
     ]
     
     tl = TrafficLightAgent(
@@ -179,7 +180,7 @@ def test_ignore_outdated_green_permissions(basic_traffic_light):
 def test_state_machine_forces_yellow_phase(basic_traffic_light):
     """
     Verifica che il passaggio Verde -> Rosso passi obbligatoriamente per il Giallo 
-    e rispetti i tempi configurati (YELLOW_TIME).
+    e rispetti i tempi configurati (YELLOW_TIME = crossing_time).
     """
     tl = basic_traffic_light
     direction = tl.directions[0]
@@ -191,7 +192,7 @@ def test_state_machine_forces_yellow_phase(basic_traffic_light):
     assert direction.state.runtime.status_time == 0
     tl._decide_state()
     assert direction.state.runtime.status == LightStatus.YELLOW
-    direction.state.runtime.status_time = tl.YELLOW_TIME
+    direction.state.runtime.status_time = direction.crossing_time
     tl._decide_state()
     assert direction.state.runtime.status == LightStatus.RED
 

@@ -34,6 +34,7 @@ class TrafficLightAgent(SystemAgent):
     # PARAMETERS (TODO: make them configurable and move them to a config file)
     TIME_BETWEEN_REQUESTS = 3 # How often I can ask for green (In mesa ticks)
     TIME_BETWEEN_SIGNALS = 2 # How often I can tell a neighbour about incoming traffic (In mesa ticks)
+    COOLDOWN_AFTER_PERMISSION_GRANTED = TIME_BETWEEN_REQUESTS + 2
     UNCERTAINTY_FACTOR = 0.5 # How much weight to give to incoming traffic when computing the score
     INCOMING_WAVE_WEIGHT = 4.0 # Sostituisce UNCERTAINTY_FACTOR per dare vero peso alle onde
     INTERSECTION_CROSSING_TIME = 3 # How long it takes for a car to cross the intersection (In mesa ticks)
@@ -69,6 +70,8 @@ class TrafficLightAgent(SystemAgent):
             for i, direction in enumerate(controlled_directions)
         ]
 
+        self.time_since_last_permission: int = self.COOLDOWN_AFTER_PERMISSION_GRANTED # Counter to track time since the last permission was granted
+
         self.requests: dict[str, Request] = {}
 
         self.possible_incoming_waves: list[IncomingTrafficWave] = []
@@ -97,6 +100,7 @@ class TrafficLightAgent(SystemAgent):
 
         self._update_failsafe_timers()
         self._update_cooldown_timers()
+        self.time_since_last_permission += 1  # Increment the counter for time since last permission granted
 
         # 3 possible states: 1) normal operation, 2) failsafe active, 3) agent turned off (not working)
         if self.failsafe_active:
@@ -107,7 +111,7 @@ class TrafficLightAgent(SystemAgent):
                 if self._wants_green(direction):
                     match direction.state.runtime.status:
                         case LightStatus.RED:
-                            if direction.state.time_since_last_request >= self.TIME_BETWEEN_REQUESTS:
+                            if direction.state.time_since_last_request >= self.TIME_BETWEEN_REQUESTS and self.time_since_last_permission >= self.COOLDOWN_AFTER_PERMISSION_GRANTED:
                                 self._request_green_light(direction)    # The request is specific to the direction
                                 #print(f"Traffic Light {self.unique_id} at intersection {self.intersection_id} sent a request to turn green for direction {direction.direction_id} with score {self._compute_score(direction)}\n")
                         case LightStatus.GREEN:
@@ -480,6 +484,7 @@ class TrafficLightAgent(SystemAgent):
                 if self._can_give_permission(request):
                     if not self._turn_incompatible_directions_red(request.requester_phase):  # All directions of other phases are already red, so we can grant permission
                         self._send_allow_green(request.requester_id, request.requester_direction_id, request.request_clock)
+                        self.time_since_last_permission = 0  # Reset the counter after granting permission
                         
                         for direction in self.directions:
                             if direction.state.permissions.get(request.requester_id):
@@ -564,6 +569,9 @@ class TrafficLightAgent(SystemAgent):
         if existing is None or request_clock >= existing.request_clock:
             self.requests[requester_direction_id] = Request(requester_id, requester_direction_id, requester_score, request_clock, requester_phase)
 
+    def _get_permissions_id_list(self, direction: ControlledDirection) -> list[str]:
+        return list(direction.state.permissions.keys())
+
     def _update_graph(self):
         # Update the graph with the current state of the traffic light
         edges = self.model.G.edges(self.node_id, data=True)
@@ -575,3 +583,4 @@ class TrafficLightAgent(SystemAgent):
                     edge_data["tl_waiting_seconds"] = direction.state.runtime.waiting_time
                     edge_data["tl_state"] = "OFF" if self.turned_off else direction.state.runtime.status
                     edge_data['tl_state_time'] = direction.state.runtime.status_time
+                    edge_data['tl_permissions_ids'] = self._get_permissions_id_list(direction)

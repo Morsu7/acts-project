@@ -41,6 +41,7 @@ def network_portrayal(G):
             priority_score = float(edge_data.get("tl_priority_score", 0.0))
             constraint_group = edge_data.get("tl_group_id", None)
             group_priority_score = float(edge_data.get("tl_group_score", 0.0))
+            permissions_ids = edge_data.get("tl_permissions_ids", [])
             edge_tooltip = (
                 f"Arco {source}->{target}"
                 f"<br>Constraint group: {constraint_group if constraint_group is not None else '-'}"
@@ -49,6 +50,7 @@ def network_portrayal(G):
                 f"<br>Priority score: {priority_score:.2f}"
                 f"<br>Group summed score: {group_priority_score:.2f}"
                 f"<br>Status light: {edge_tl_state}"
+                f"<br>Permissions IDs: {', '.join(permissions_ids) if permissions_ids else '-'}"
             )
 
         portrayal['edges'].append({

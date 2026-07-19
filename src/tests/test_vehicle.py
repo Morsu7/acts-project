@@ -82,3 +82,19 @@ def test_vehicle_arrival_transition(vehicle):
     assert vehicle.state == "QUEUED"
     assert vehicle.runtime.path == [1, 2] # Il nodo 0 è stato rimosso (pop)
     vehicle.model.grid.place_agent.assert_called_with(vehicle, 1) # Riposizionato fisicamente sul nodo
+
+def test_vehicle_handles_unreachable_destination(vehicle):
+    """
+    Verifica che il veicolo non vada in crash se la destinazione è irraggiungibile,
+    ma resetti il path per farsi assegnare una nuova rotta al tick successivo.
+    """
+    import networkx as nx
+    vehicle.runtime.destination = 99 # Destinazione fittizia
+    
+    # Simuliamo l'eccezione di NetworkX quando non c'è percorso
+    with patch("acts.agents.vehicle.find_constrained_path", side_effect=nx.NetworkXNoPath):
+        vehicle._plan_route()
+        
+    # Deve aver svuotato path e destinazione per riprovare
+    assert vehicle.runtime.path == []
+    assert vehicle.runtime.destination is None

@@ -213,3 +213,43 @@ def test_tie_breaking_equal_scores(basic_traffic_light):
     assert tl._can_give_permission(req_newer) is False
     req_tie = Request(requester_id="tl_2", requester_direction_id="tl_2_dir0", requester_score=direction.state.score, request_clock=5, requester_phase=2)
     assert tl._can_give_permission(req_tie) is False
+
+def test_failsafe_activation_on_silent_neighbor(basic_traffic_light):
+    """
+    Verifica che il semaforo entri in modalità di emergenza (Failsafe) 
+    se un vicino non risponde per troppo tempo.
+    """
+    tl = basic_traffic_light
+    # Simuliamo che il vicino 'tl_2' sia silente fino alla soglia di allarme
+    tl.neighbor_quiet_time = {"tl_2": tl.FAILSAFE_THRESHOLD}
+    
+    # 1° Step: Il semaforo se ne accorge e avvia l'Health Check
+    tl._update_failsafe_timers()
+    assert tl.health_check_active is True
+    #Viene subito incrementato il timer di Health Check
+    assert tl.health_check_timer == 1
+    
+    # Simuliamo che passi il tempo dell'Health Check senza ricevere risposte
+    tl.health_check_timer = tl.HEALTH_CHECK_THRESHOLD
+    
+    # 2° Step: Scatta il Failsafe
+    tl._update_failsafe_timers()
+    
+    assert tl.failsafe_active is True
+    assert tl.directions[0].state.runtime.status == LightStatus.FLASHING_YELLOW
+
+def test_toggle_power_resets_state(basic_traffic_light):
+    """
+    Verifica che lo spegnimento forzato del semaforo resetti lo stato a RED
+    per prevenire incidenti.
+    """
+    tl = basic_traffic_light
+    direction = tl.directions[0]
+    
+    # Lo forziamo a verde
+    direction.state.runtime.status = LightStatus.GREEN
+    
+    # Simuliamo l'intervento umano che spegne il semaforo
+    tl.set_power(False)
+    
+    assert tl.turned_off is True

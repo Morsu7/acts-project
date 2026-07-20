@@ -32,13 +32,11 @@ class IncomingTrafficWave:
         self.expected_arrival_time = expected_arrival_time
 
 class TrafficLightAgent(SystemAgent):
-
-    # PARAMETERS (TODO: make them configurable and move them to a config file)
     TIME_BETWEEN_REQUESTS = 3 # How often I can ask for green (In mesa ticks)
     TIME_BETWEEN_SIGNALS = 2 # How often I can tell a neighbour about incoming traffic (In mesa ticks)
     COOLDOWN_AFTER_PERMISSION_GRANTED = TIME_BETWEEN_REQUESTS + 2
     UNCERTAINTY_FACTOR = 0.5 # How much weight to give to incoming traffic when computing the score
-    INCOMING_WAVE_WEIGHT = 4.0 # Sostituisce UNCERTAINTY_FACTOR per dare vero peso alle onde
+    INCOMING_WAVE_WEIGHT = 4.0
     FAILSAFE_THRESHOLD = 6 # How long to wait before checking for failsafe (In mesa ticks)
     HEALTH_CHECK_THRESHOLD = 3 # How long before going into failsafe if no replies (In mesa ticks)
     NEAR_TRAFFIC_LIGHT_THRESHOLD = 30 # Define how close a driving car must be (in meters) to be counted

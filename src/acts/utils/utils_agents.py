@@ -63,7 +63,6 @@ def find_constrained_path(G: nx.DiGraph, heuristic_fn, start: int, goal: int) ->
         if current == goal:
             return path
 
-        # Ottimizzazione: se abbiamo trovato un percorso migliore per questo stato, ignoriamo
         if g_score > shortest_paths.get((current, last_was_internal), float('inf')):
             continue
 

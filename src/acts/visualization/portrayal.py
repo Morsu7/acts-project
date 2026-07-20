@@ -64,7 +64,6 @@ def network_portrayal(G):
             'hoverable': internal_edge,
         })
 
-        # --- NEW: Catch driving cars floating inside this edge ---
         driving_cars = edge_data.get("vehicles", [])
         for car in driving_cars:
             # When driving, car.pos is a tuple (source, target), but _compute_vehicle_marker 
@@ -81,11 +80,11 @@ def network_portrayal(G):
         cars = [a for a in agents if _is_vehicle_agent(a)]
         
         if node_data.get("is_gate", False):
-            color = "#007BFF"  # Blu brillante per i nodi spawn/sink
-            size = 12          # Più grande rispetto ai nodi regolari
+            color = "#007BFF"
+            size = 12
             tooltip = f"🚪 <b>GATE DI ACCESSO (Nodo {node})</b><br>Punto di ingresso/uscita veicoli"
         else:
-            color = "#777777"  # Grigio standard
+            color = "#777777"
             size = 6
             tooltip = f"Nodo {node}<br>Incrocio: {intersection_id}<br>Stop line"
 

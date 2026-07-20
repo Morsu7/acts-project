@@ -1,10 +1,6 @@
 import time
 import tornado.autoreload as autoreload
 
-# Disattiva l'autoreload di Tornado a livello globale, PRIMA che
-# ModularServer/Application lo avviino internamente (debug=True hardcoded
-# in mesa_viz_tornado). Il modulo non espone un .stop() pubblico, quindi
-# impediamo che .start() faccia qualcosa fin dall'inizio.
 autoreload.start = lambda *args, **kwargs: None
 
 from mesa.visualization.ModularVisualization import ModularServer

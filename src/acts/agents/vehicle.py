@@ -146,13 +146,11 @@ class VehicleAgent(PublishingAgent):
 
         edge_data = self.model.G.get_edge_data(self.pos, next_node) or {}
         edge_state = edge_data.get("tl_state")
-        if edge_state is not None and str(edge_state).upper() != "GREEN":
+        if edge_state is not None and str(edge_state).upper() not in ("GREEN", "FLASHING_YELLOW", "OFF"):
             self.model.release_unused_node_lock(self.pos)
             return
 
         # --- UPDATED MOVEMENT MATH: Physical parameters determine timing ---
-        # Internal edges pull 15.0m / 5.0m/tick (= 3 ticks)
-        # External roads pull real scaled meters / tier-specific velocity
         length = edge_data.get("length", 15.0)
         max_speed = edge_data.get("max_speed", 5.0)
         

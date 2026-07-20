@@ -38,7 +38,7 @@ class TopologyBuilder:
             random_groups = self._build_random_edge_groups(sorted_nodes)
             self.network.set_intersection_priority_groups(intersection_id, random_groups)
         
-        # Compilazione finale (ora puramente deterministica sulle strutture)
+        # Compilazione finale
         self.network.compile_metadata()
         
         return self.network.graph

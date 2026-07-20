@@ -1,37 +1,170 @@
-# ACTS (Autonomous City Traffic Simulation)
+# ACTS: Autonomous City Traffic Simulation
 
-Project for the **Distributed Systems** course at University of Bologna / Cesena Campus.
+ACTS is a decentralized, event-driven Multi-Agent System (MAS) for the simulation of urban traffic dynamics. Developed for the Distributed Systems course at the University of Bologna (Cesena Campus), the system replaces centralized traffic control with a peer-to-peer network where each intersection and vehicle acts as an independent autonomous agent.
 
-ACTS simulates urban traffic using a decentralized Multi-Agent System (MAS). Instead of a central server controlling every light, each intersection and vehicle is an independent agent. They communicate locally to negotiate rights-of-way, mimicking a real peer-to-peer network topology.
+## Architectural Overview
 
-![Screenshot](docs/screenshot.png)
-*(Note: Visualized using Mesa NetworkModule to show logical connections)*
+ACTS focuses on decentralization, asynchronous communication, and fault tolerance:
 
-## Key Features
+* **Decentralized Consensus:** Traffic lights negotiate green phases using distributed mutual exclusion mechanisms. Conflicts are resolved deterministically through Lamport Clocks and tie-breaking algorithms, ensuring stability and preventing deadlocks.
+* **Event-Driven Backbone:** Agents operate in isolated execution contexts and communicate exclusively through asynchronous message passing using Redis as a message broker.
+* **Fault Tolerance:** The system implements heartbeat protocols and health checks. Agents detect neighbor failures and automatically transition into safe fallback states without requiring centralized control.
+* **Dynamic Routing:** Vehicles use constrained pathfinding algorithms powered by NetworkX to dynamically recalculate routes according to traffic conditions, traffic signal states, and local topology.
+* **Graph-Based City Model:** The urban environment is represented as a directed NetworkX graph, where nodes correspond to intersections and edges represent road segments. This enables the simulation of complex city layouts beyond simple grid structures.
 
-* **Graph-Based Topology:** We moved away from standard grid-based simulations. The city is modeled as a NetworkX graph where nodes are intersections and edges are roads.
-* **Decentralized Logic:** Vehicles calculate paths based on local graph data.
-* **Visualization:** Real-time view of the network state (Red nodes = Occupied, Green/Grey = Free).
+---
+
+## Infrastructure
+
+* **Simulation Engine:** Mesa (Agent-Based Modeling framework)
+* **Communication Layer:** Redis Pub/Sub event bus
+* **Environment Management:** Docker & Docker Compose
+* **Programming Language:** Python 3.10+
+
+---
 
 ## Project Structure
 
-* `src/acts/core`: Main simulation loop and graph generation.
-* `src/acts/agents`: Logic for Vehicles (movement) and Infrastructure.
-* `src/acts/visualization`: Server setup using Mesa's NetworkModule.
-* `src/acts/utils`: Helper scripts for topology generation (Random Geometric Graph).
+```
+src/
+├── acts/
+│   ├── core/              # Simulation orchestration and main execution loop
+│   ├── agents/            # Autonomous Vehicle and Traffic Light agents
+│   ├── city_model/        # City topology generation and graph models
+│   ├── visualization/     # Web-based control plane and visualization
+│   └── utils/             # Messaging utilities and shared algorithms
+│
+tests/                     # Unit and integration tests
+start.sh                   # Automated setup and execution script
+docker-compose.yml         # Redis infrastructure definition
+requirements.txt           # Python dependencies
+```
 
-## Installation & Run
+---
 
-You need **Python 3.10+**.
+# Getting Started
 
-### 1. Local Setup (Recommended)
+## Prerequisites
 
-Clone the repo and install dependencies in editable mode (this is important for imports to work):
+Make sure the following software is installed:
+
+* Python 3.10 or higher
+* Docker
+* Docker Compose
+
+# Installation & Execution
+
+## Automated Setup (Recommended)
+
+The repository provides a startup script that automatically:
+
+1. Configures the Python environment.
+2. Starts the Redis message broker.
+3. Creates the virtual environment if it does not exist.
+4. Installs Python dependencies.
+5. Runs the test suite.
+6. Starts the ACTS simulation.
+
+Run:
 
 ```bash
-# Create venv
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+chmod +x start.sh
+./start.sh
+```
 
-# Install requirements and the package itself
-pip install -e .
+The script automatically configures:
+
+```bash
+PYTHONPATH=<project-root>/src
+```
+
+so that the ACTS package can be correctly imported.
+
+# Manual Execution
+
+If you prefer to run the system manually:
+
+## 1. Start Redis
+
+```bash
+docker compose up -d redis
+```
+
+## 2. Create and activate the virtual environment
+
+### Linux/macOS
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### Windows
+
+```powershell
+python -m venv venv
+venv\Scripts\activate
+```
+
+## 3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+## 4. Configure Python path
+
+### Linux/macOS
+
+```bash
+export PYTHONPATH=$PWD/src
+```
+
+### Windows PowerShell
+
+```powershell
+$env:PYTHONPATH="$PWD/src"
+```
+
+## 5. Run tests
+
+```bash
+pytest
+```
+
+## 6. Start ACTS
+
+```bash
+python -m acts
+```
+
+# Web Interface
+
+Once ACTS is running, the simulation dashboard is available at:
+
+```
+http://localhost:8521
+```
+
+The interface provides a real-time visualization of:
+
+* City topology and road network.
+* Vehicle movements.
+* Traffic light states.
+* Agent interactions.
+
+# Development Notes
+
+ACTS is designed as a distributed simulation environment where each component behaves as an autonomous agent.
+
+The main design principles are:
+
+* No centralized traffic controller.
+* Asynchronous communication between agents.
+* Local decision-making.
+* Distributed coordination through logical clocks.
+* Resilient behavior under node failures.
+
+# License
+
+This project was developed as part of the Distributed Systems course at the University of Bologna (Cesena Campus).

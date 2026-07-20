@@ -45,10 +45,10 @@ def start_monitoring(show_traffic_lights=True, show_vehicles=True, show_failsafe
                 # ==========================================
                 if show_vehicles and incrocio == "GLOBAL":
                     if evt == "DEPARTING":
-                        print(f"{ts:<10} | {clock_str:<6} | {incrocio:<8} | {agent:<12} | 💨 DRIVING {data['from']} -> {data['to']} ({data['duration']}s)")
+                        print(f"{ts:<10} | {clock_str:<6} | {incrocio:<8} | {agent:<12} | DRIVING {data['from']} -> {data['to']} ({data['duration']}s)")
 
                     elif evt == "PLANNING_ASTAR":
-                        print(f"{ts:<10} | {clock_str:<6} | {incrocio:<8} | {agent:<12} | 🧭 A* target={data.get('dest')} steps={data.get('steps')}")
+                        print(f"{ts:<10} | {clock_str:<6} | {incrocio:<8} | {agent:<12} | A* target={data.get('dest')} steps={data.get('steps')}")
 
                 # ==========================================
                 # EVENTI DEL PROTOCOLLO DISTRIBUITO (SEMAFORI)
@@ -76,10 +76,10 @@ def start_monitoring(show_traffic_lights=True, show_vehicles=True, show_failsafe
                 # ==========================================
                 if show_failsafe and incrocio != "GLOBAL":
                     if evt == "HEALTH_CHECK":
-                        print(f"{ts:<10} | {clock_str:<6} | {incrocio:<8} | {agent:<12} | 🩺 HEALTH CHECK| Are you alive?")
+                        print(f"{ts:<10} | {clock_str:<6} | {incrocio:<8} | {agent:<12} | HEALTH CHECK| Are you alive?")
                         
                     elif evt == "ALIVE_SIGNAL":
-                        print(f"{ts:<10} | {clock_str:<6} | {incrocio:<8} | {agent:<12} | 💓 ALIVE       | To: {data.get('target_tl_id')}")
+                        print(f"{ts:<10} | {clock_str:<6} | {incrocio:<8} | {agent:<12} | ALIVE       | To: {data.get('target_tl_id')}")
 
             except Exception as e:
                 pass
